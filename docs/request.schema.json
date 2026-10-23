@@ -164,11 +164,16 @@
             },
             "operation": {
               "enum": [
+                "compute",
                 "simplify",
                 "differentiate",
                 "integrate",
                 "expand",
-                "evaluate"
+                "evaluate",
+                "solve",
+                "determinant",
+                "inverse",
+                "transpose"
               ]
             },
             "variable": {

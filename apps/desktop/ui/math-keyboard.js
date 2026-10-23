@@ -1,5 +1,6 @@
 import {referenceKeys} from './math-keyboard-data.js';
-import {editSelection,eraseSelection,DraftHistory} from './math-keyboard-edit.js';
+import {computationalLatexGroups,referenceNotation} from './math-keyboard-layout.js';
+import {editSelection,eraseSelection,DraftHistory,nextPlaceholder} from './math-keyboard-edit.js';
 import {t} from './i18n.js';
 const reference=(symbol)=>referenceKeys.find(k=>k.s===symbol);
 const adapted=(symbol,extra)=>({label:reference(symbol).s,...extra});
@@ -8,17 +9,10 @@ const groups={
  functions:['sin','cos','exp','log','sqrt','abs'].map(name=>({label:name,wrap:`${name}($)`})),
  calculus:[adapted('d/dx',{run:'differentiate'}),adapted('∫',{run:'integrate'})]
 };
-const raw=[...new Map(referenceKeys.filter(k=>k.c&&k.c.trim()).map(k=>[k.c,k])).values()];
-const latexGroups={
- functions:["sin","cos","exp","ln"].map(name=>({s:name,c:`\\${name}{}`})),
- basic:raw.filter(k=>!k.t?.includes('calculus')&&!/\\(int|iint|iiint|oint|partial|nabla|Delta|lim|sup|inf|sum|prod|coprod|in |notin|subset|Rightarrow|pm|infty|leq|geq|approx|equiv|therefore|because)/.test(k.c)),
- calculus:raw.filter(k=>k.t?.includes('calculus')||/\\(int|iint|iiint|oint|partial|nabla|Delta|lim|sup|inf|sum|prod|coprod)/.test(k.c)),
- symbols:raw.filter(k=>/\\(in |notin|subset|Rightarrow|pm|infty|leq|geq|approx|equiv|therefore|because)/.test(k.c))
-};
 const glyph=k=>((k.c.startsWith('\\left[')?'[ ]':null)||{'分数':'a⁄b','根号':'√x','積分':'∫','極限':'lim'}[k.s]||k.s);
 const histories=new Map(),tabs=new Map();
 function element(tag,attributes={},text){const e=document.createElement(tag);for(const [k,v]of Object.entries(attributes))e.setAttribute(k,String(v));if(text!==undefined)e.textContent=text;return e;}
-export function createMathKeyboard(target,{id,mode='expression',onRun,onClose}){
+export function createMathKeyboard(target,{id,mode='expression',includeReference=false,onRun,onClose}){
  const historyKey=`${id}:${mode}`;
  let history=histories.get(historyKey);
  if(!history||history.entries[history.index]!==target.value)history=new DraftHistory(target.value);
@@ -29,7 +23,7 @@ export function createMathKeyboard(target,{id,mode='expression',onRun,onClose}){
  const grid=element('div',{class:'keyboard-grid',role:'group','aria-label':t('math_keyboard')});
  const message=element('span',{class:'keyboard-message small',role:'status'});
  const nav=element('div',{class:'keyboard-nav'});
- const categories=mode==='latex'?latexGroups:groups;
+ const categories=mode==='latex'?{...computationalLatexGroups,...(includeReference?{reference:referenceNotation}:{})}:groups;
  let tab=tabs.get(historyKey)||'basic';if(!categories[tab])tab='basic';
  const keyButton=(label,title,fn,attrs={})=>{const b=element('button',{type:'button',title,'aria-label':title,...attrs},label);b.addEventListener('pointerdown',e=>{if(e.button===0)e.preventDefault()});b.addEventListener('click',fn);return b};
  function apply(edit,record=true){
@@ -42,7 +36,8 @@ export function createMathKeyboard(target,{id,mode='expression',onRun,onClose}){
  const redo=keyButton('↷',t('keyboard_redo'),()=>move(1));
  function refreshHistory(){undo.disabled=history.index===0;redo.disabled=history.index===history.entries.length-1}
  target.addEventListener('input',()=>{history.record(target.value);refreshHistory()});
- target.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();e.stopPropagation();move(e.shiftKey?1:-1)}});
+ function placeholder(backward=false){const range=nextPlaceholder(target.value,target.selectionStart,target.selectionEnd,backward);if(range){target.focus();target.setSelectionRange(range.start,range.end)}return range}
+ target.addEventListener('keydown',e=>{if(e.key==='Tab'&&placeholder(e.shiftKey)){e.preventDefault();e.stopPropagation();return;}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();e.stopPropagation();move(e.shiftKey?1:-1)}});
  for(const key of Object.keys(categories)){
   const b=keyButton(t(`keyboard_${key}`),t(`keyboard_${key}`),()=>{tab=key;tabs.set(historyKey,key);draw()},{'data-category':key});controls.append(b);
  }
@@ -54,7 +49,7 @@ export function createMathKeyboard(target,{id,mode='expression',onRun,onClose}){
    grid.append(keyButton(key.label,title,()=>{if(key.run){onRun?.(key.run);return}apply(editSelection(target.value,target.selectionStart,target.selectionEnd,key,mode))}));
   }
  }
- nav.append(undo,redo,
+ nav.append(undo,redo,keyButton('□ →',t('next_placeholder'),()=>placeholder()),
   keyButton('←',t('keyboard_left'),()=>{const p=target.selectionStart!==target.selectionEnd?target.selectionStart:Math.max(0,target.selectionStart-1);target.focus();target.setSelectionRange(p,p)}),
   keyButton('→',t('keyboard_right'),()=>{const p=target.selectionStart!==target.selectionEnd?target.selectionEnd:Math.min(target.value.length,target.selectionEnd+1);target.focus();target.setSelectionRange(p,p)}),
   keyButton('⌫',t('keyboard_backspace'),()=>apply(eraseSelection(target.value,target.selectionStart,target.selectionEnd,true))),

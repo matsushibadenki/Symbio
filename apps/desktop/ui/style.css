@@ -14,3 +14,27 @@
 
 .object-row .symbol{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .object-meta>span{overflow-wrap:anywhere}
+
+/* Publication-like mathematical layout, with a separate focus view for large expressions. */
+.formula{position:relative;padding:16px 30px 16px 16px;min-width:0;color:var(--color-ink)}
+.formula .math-scroll{overflow-x:auto;overscroll-behavior-x:contain;padding:6px 0 10px;scrollbar-width:thin}
+.formula math{font-family:var(--font-math);font-size:30px;line-height:1.5;math-style:normal;margin:0 auto;width:max-content;max-width:none}
+.formula-zoom{position:absolute;top:2px;right:0;opacity:0;min-height:26px;padding:4px;color:var(--color-muted)}
+.formula:hover .formula-zoom,.formula:focus-within .formula-zoom{opacity:1}
+.input-render{border-block:1px solid var(--color-line);margin:8px 0 12px;background:var(--color-paper)}
+.latex-preview{padding:0;min-height:76px;display:grid;align-items:center}
+.latex-preview[data-state="error"],.latex-preview[data-state="pending"]{padding:12px}
+.output{border-left:2px solid var(--color-accent);background:linear-gradient(100deg,var(--color-selected),var(--color-panel));padding:12px 16px}
+.output .formula math{font-size:32px}
+.output-header{align-items:center;letter-spacing:.02em}
+.trust-badge{font-size:10px;border:1px solid var(--color-line);border-radius:3px;padding:2px 6px;background:var(--color-paper)}
+.context-operations{display:inline-flex;gap:4px}.context-operations:empty{display:none}
+.operation-bar{flex-wrap:wrap;row-gap:6px}
+.formula-dialog{width:min(1000px,calc(100vw - 48px));max-height:calc(100vh - 48px);border-radius:8px}
+.formula-dialog .dialog-head{border-bottom:1px solid var(--color-line);padding-bottom:12px}
+.formula-dialog input[type="range"]{width:140px;padding:0}
+.formula-stage{--formula-size:44px;overflow:auto;padding:40px 24px;max-height:70vh;min-height:200px;display:grid;align-items:center}
+.formula-stage math{font-family:var(--font-math);font-size:var(--formula-size);margin:auto;width:max-content;math-style:normal}
+.keyboard-tabs{flex-wrap:wrap}.keyboard-tabs button{white-space:nowrap}
+@media(max-width:430px){.formula math,.output .formula math{font-size:26px}.formula{padding:12px 20px 12px 4px}.formula-zoom{opacity:1}.formula-stage{padding:24px 4px}}
+.operation-bar:is([data-kind="matrix"],[data-kind="equation"],[data-kind="integral"],[data-kind="aggregate"],[data-kind="derivative"]) :is([data-operation="differentiate"],[data-operation="integrate"],[data-operation="expand"],[data-operation="plot"]){display:none}

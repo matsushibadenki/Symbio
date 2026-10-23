@@ -1,6 +1,6 @@
 // Preview has no document ownership: Rust builds an isolated SEG and returns safe MathML.
 // Results from old edits / detached panels must never replace the current draft preview.
-export function bindLatexPreview(target, host, {request, translate, renderFormula}) {
+export function bindLatexPreview(target, host, {request, translate, renderFormula, onResult=()=>{}}) {
  let timer, generation=0;
  function schedule() {
   const version=++generation, source=target.value;
@@ -15,7 +15,7 @@ export function bindLatexPreview(target, host, {request, translate, renderFormul
    try {
     const result=await request(source);
     if(!host.isConnected||version!==generation)return;
-    host.dataset.state='ready';
+    host.dataset.state='ready';onResult(result);
     host.replaceChildren(renderFormula(result.mathml));
     host.title=result.expression;
    } catch(error) {

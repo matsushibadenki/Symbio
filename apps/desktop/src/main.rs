@@ -77,6 +77,20 @@ async fn preview_latex(
     .map_err(|_| error("internal_error"))?
 }
 #[tauri::command]
+async fn convert_source(
+    webview: tauri::Webview,
+    source: String,
+    from_format: symbio_core::SourceFormat,
+    to_format: symbio_core::SourceFormat,
+) -> Result<String, UiError> {
+    authorize(&webview)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        symbio_core::latex::convert(&source, from_format, to_format).map_err(UiError::from)
+    })
+    .await
+    .map_err(|_| error("internal_error"))?
+}
+#[tauri::command]
 async fn edit(webview: tauri::Webview, request: Request) -> Result<Snapshot, UiError> {
     authorize(&webview)?;
     let app = webview.app_handle().clone();
@@ -215,6 +229,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             preview_latex,
+            convert_source,
             set_draft,
             snapshot,
             edit,

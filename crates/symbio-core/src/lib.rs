@@ -1,15 +1,17 @@
 //! Symbio's UI-independent owner: all operations are revision-checked transactions.
 pub mod algebra;
+pub mod exchange;
 pub mod graph;
 pub mod latex;
 pub mod model;
 pub mod parser;
 mod storage;
+pub mod structured;
 pub use model::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 pub use storage::ProjectStore;
-pub const ENGINE: &str = "symbio-rust/0.1.0";
+pub const ENGINE: &str = "symbio-rust/0.2.0";
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("revision conflict")]
@@ -113,6 +115,7 @@ pub struct CellView {
     #[serde(flatten)]
     pub cell: Cell,
     pub expression: String,
+    pub kind: String,
     pub mathml: String,
     pub result_text: Option<String>,
     pub result_mathml: Option<String>,
@@ -181,6 +184,7 @@ impl AppCore {
                 .iter()
                 .map(|c| CellView {
                     cell: c.clone(),
+                    kind: structured::kind(&p.graph, c.root).into(),
                     expression: p.graph.text(c.root),
                     mathml: p.graph.mathml(c.root),
                     result_text: c.output.as_ref().map(|o| {
@@ -188,10 +192,15 @@ impl AppCore {
                             o.value.map(|v| format!("{v:.12}")).unwrap_or_default()
                         })
                     }),
-                    result_mathml: c
-                        .output
-                        .as_ref()
-                        .and_then(|o| o.root.map(|r| p.graph.mathml(r))),
+                    result_mathml: c.output.as_ref().and_then(|o| {
+                        o.root.map(|r| {
+                            if o.trust == Trust::Approximate {
+                                p.graph.approximate_mathml(r)
+                            } else {
+                                p.graph.mathml(r)
+                            }
+                        })
+                    }),
                     symbols: p.graph.symbols(c.root).into_iter().collect(),
                     dimension: algebra::dimension(&p.graph, c.root, &b.assumptions, 0)
                         .ok()
@@ -271,7 +280,7 @@ impl AppCore {
             }
         }
         Ok(
-            serde_json::json!({"cell":cell,"nodes":seen.into_iter().map(|i|serde_json::json!({"id":i,"node":self.project.graph.nodes[i]})).collect::<Vec<_>>(),"assumptions":self.project.current().assumptions,"engine":ENGINE,"revision":self.project.revision}),
+            serde_json::json!({"cell":cell,"nodes":seen.into_iter().map(|i|serde_json::json!({"id":i,"node":self.project.graph.nodes[i],"children":self.project.graph.nodes[i].children()})).collect::<Vec<_>>(),"assumptions":self.project.current().assumptions,"engine":ENGINE,"revision":self.project.revision}),
         )
     }
 }
@@ -287,6 +296,7 @@ fn execute(p: &mut Project, command: &Command) -> Result<()> {
                 return Err(Error::Invalid("name".into()));
             }
             let root = source_format.parse(&mut p.graph, source)?;
+            structured::shape(&p.graph, root)?;
             algebra::dimension(&p.graph, root, &p.current().assumptions, 0)?;
             if p.current()
                 .cells
@@ -361,7 +371,39 @@ fn execute(p: &mut Project, command: &Command) -> Result<()> {
                 })
                 .collect();
             let (result, value, trust, precision) = match operation.as_str() {
-                "simplify" => (
+                "solve" => {
+                    conditions.push("real roots; symbolic solver, not a formal proof".into());
+                    (
+                        Some(structured::solve(
+                            &mut p.graph,
+                            root,
+                            variable,
+                            &assumptions,
+                        )?),
+                        None,
+                        Trust::Symbolic,
+                        "exact",
+                    )
+                }
+                "determinant" | "inverse" | "transpose" => {
+                    let r = algebra::simplify(&mut p.graph, root, &assumptions)?;
+                    (
+                        Some(structured::matrix_call(
+                            &mut p.graph,
+                            if operation == "determinant" {
+                                "det"
+                            } else {
+                                operation
+                            },
+                            r,
+                            &assumptions,
+                        )?),
+                        None,
+                        Trust::Symbolic,
+                        "exact",
+                    )
+                }
+                "compute" | "simplify" => (
                     Some(algebra::simplify(&mut p.graph, root, &assumptions)?),
                     None,
                     Trust::Symbolic,
@@ -379,9 +421,20 @@ fn execute(p: &mut Project, command: &Command) -> Result<()> {
                     "exact",
                 ),
                 "integrate" => {
-                    conditions.push("antiderivative; add arbitrary constant C".into());
+                    if !matches!(
+                        p.graph.nodes[root],
+                        graph::Node::Integral { lower: Some(_), .. }
+                    ) {
+                        conditions.push("antiderivative; add arbitrary constant C".into());
+                    }
                     (
-                        Some(algebra::integrate(&mut p.graph, root, variable)?),
+                        Some(
+                            if matches!(p.graph.nodes[root], graph::Node::Integral { .. }) {
+                                algebra::simplify(&mut p.graph, root, &assumptions)?
+                            } else {
+                                algebra::integrate(&mut p.graph, root, variable)?
+                            },
+                        ),
                         None,
                         Trust::Symbolic,
                         "exact",
@@ -410,15 +463,25 @@ fn execute(p: &mut Project, command: &Command) -> Result<()> {
                         }
                     }
                     conditions.extend(bindings.iter().map(|(s, v)| format!("{s} = {v}")));
+                    let (result, value) =
+                        structured::numeric(&mut p.graph, root, bindings, &assumptions)?;
                     (
-                        None,
-                        Some(p.graph.numeric(root, bindings)?),
+                        result,
+                        value,
                         Trust::Approximate,
                         "float64; no certified error bound",
                     )
                 }
                 _ => return Err(Error::Unsupported(operation.clone())),
             };
+            if matches!(operation.as_str(), "compute" | "simplify" | "integrate")
+                && structured::has_indefinite_integral(&p.graph, root)
+                && !conditions
+                    .iter()
+                    .any(|s| s == "antiderivative; add arbitrary constant C")
+            {
+                conditions.push("antiderivative; add arbitrary constant C".into());
+            }
             let output = Output {
                 root: result,
                 value,

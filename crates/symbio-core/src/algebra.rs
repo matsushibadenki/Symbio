@@ -12,7 +12,7 @@ fn nonzero(g: &Graph, id: Id, a: &Assumptions) -> bool {
 }
 fn total(g: &Graph, id: Id) -> bool {
     match &g.nodes[id] {
-        Node::Number(_) | Node::Symbol(_) => true,
+        Node::Number(_) | Node::Symbol(_) | Node::Constant(_) => true,
         Node::Add(a, b) | Node::Sub(a, b) | Node::Mul(a, b) => total(g, *a) && total(g, *b),
         Node::Pow(a, b) => {
             g.value(*b)
@@ -37,6 +37,20 @@ pub fn simplify(g: &mut Graph, root: Id, a: &Assumptions) -> Result<Id> {
             return Ok(*v);
         }
         let n = g.nodes[id].clone();
+        if matches!(
+            n,
+            Node::Constant(_)
+                | Node::Integral { .. }
+                | Node::Derivative { .. }
+                | Node::Aggregate { .. }
+                | Node::Matrix { .. }
+                | Node::Equation(..)
+                | Node::Solutions { .. }
+        ) {
+            let result = crate::structured::reduce(g, id, a)?;
+            memo.insert(id, result);
+            return Ok(result);
+        }
         let children = n.children();
         let mut out = vec![];
         for c in children {
@@ -46,7 +60,28 @@ pub fn simplify(g: &mut Graph, root: Id, a: &Assumptions) -> Result<Id> {
             Node::Number(_) | Node::Symbol(_) => id,
             Node::Call(f, _) => {
                 let v = out[0];
+                if ["det", "inverse", "transpose"].contains(&f.as_str()) {
+                    let r = crate::structured::matrix_call(g, &f, v, a)?;
+                    memo.insert(id, r);
+                    return Ok(r);
+                }
                 match (f.as_str(), g.nodes[v].clone()) {
+                    ("sqrt", _) if g.value(v).is_some_and(|v| !v.is_negative()) => {
+                        let q = g.value(v).unwrap();
+                        let n = q.numer().sqrt();
+                        let d = q.denom().sqrt();
+                        if &n * &n == *q.numer() && &d * &d == *q.denom() {
+                            g.rat(Rational::new(n, d))?
+                        } else {
+                            g.intern(Node::Call(f, v))?
+                        }
+                    }
+                    ("sin", Node::Constant(s)) if s == "pi" => g.number(0)?,
+                    ("cos", Node::Constant(s)) if s == "pi" => g.number(-1)?,
+                    ("sin", _) if g.value(v).is_some_and(|v| v.is_zero()) => g.number(0)?,
+                    ("cos" | "exp", _) if g.value(v).is_some_and(|v| v.is_zero()) => g.number(1)?,
+                    ("floor", _) if g.value(v).is_some() => g.rat(g.value(v).unwrap().floor())?,
+                    ("ceil", _) if g.value(v).is_some() => g.rat(g.value(v).unwrap().ceil())?,
                     ("sqrt", Node::Pow(base, power))
                         if g.value(power) == Some(Rational::from_integer(2.into())) =>
                     {
@@ -66,6 +101,10 @@ pub fn simplify(g: &mut Graph, root: Id, a: &Assumptions) -> Result<Id> {
             }
             n => {
                 let (x, y) = (out[0], out[1]);
+                if let Some(result) = crate::structured::matrix_binary(g, &n, x, y, a)? {
+                    memo.insert(id, result);
+                    return Ok(result);
+                }
                 let xv = g.value(x);
                 let yv = g.value(y);
                 let zero = Rational::zero();
@@ -330,7 +369,24 @@ pub fn dimension(
         }
     };
     match &g.nodes[id] {
-        Node::Number(_) => Ok(Some([0; 3])),
+        Node::Constant(_) | Node::Number(_) => Ok(Some([0; 3])),
+        Node::Matrix { .. }
+        | Node::Integral { .. }
+        | Node::Derivative { .. }
+        | Node::Aggregate { .. }
+        | Node::Solutions { .. } => {
+            for child in g.nodes[id].children() {
+                d(child)?;
+            }
+            Ok(None)
+        }
+        Node::Equation(x, y) => {
+            let (x, y) = (d(*x)?, d(*y)?);
+            if x.is_some() && y.is_some() && x != y {
+                return Err(Error::Domain("equation dimension mismatch".into()));
+            }
+            Ok(None)
+        }
         Node::Symbol(s) => {
             let dim = assumptions.get(s).and_then(|a| a.dimension);
             if dim.is_some_and(|d| d.iter().any(|v| v.unsigned_abs() > 16)) {

@@ -30,3 +30,9 @@ export class DraftHistory {
   record(value){if(this.entries[this.index]===value)return;this.entries=this.entries.slice(0,this.index+1);this.entries.push(value);if(this.entries.length>32)this.entries.shift();this.index=this.entries.length-1;}
   move(delta){this.index=Math.max(0,Math.min(this.entries.length-1,this.index+delta));return this.entries[this.index];}
 }
+
+export function nextPlaceholder(value,start,end,backward=false){
+ const positions=[...value.matchAll(/□/g)].map(m=>m.index);if(!positions.length)return null;
+ const position=backward?(positions.filter(p=>p<start).at(-1)??positions.at(-1)):(positions.find(p=>p>=end&&(p!==start||end===start))??positions[0]);
+ return {start:position,end:position+1};
+}

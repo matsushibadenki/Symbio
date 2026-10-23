@@ -46,3 +46,12 @@ test('draft undo branches and is bounded independently of document history',()=>
  h.move(-1);h.record('cos(x)');assert.equal(h.move(1),'cos(x)');
  for(let i=0;i<100;i++)h.record(String(i));assert.equal(h.entries.length,32);
 });
+
+test('matrix placeholders advance by Tab without damaging row separators',async()=>{
+ const {nextPlaceholder}=await import('../apps/desktop/ui/math-keyboard-edit.js');
+ const {computationalLatexGroups}=await import('../apps/desktop/ui/math-keyboard-layout.js');
+ const matrix=computationalLatexGroups.matrices.find(k=>k.s==='2×2');
+ let out=editSelection('',0,0,{code:matrix.c},'latex');
+ for(const value of ['1','2','3','4']){out=editSelection(out.value,out.start,out.end,{code:value},'latex');const range=nextPlaceholder(out.value,out.start,out.end);if(range)out={value:out.value,...range};}
+ assert.equal(out.value,'\\begin{bmatrix}1 & 2 \\\\ 3 & 4\\end{bmatrix}');assert.equal(nextPlaceholder(out.value,0,0),null);
+});

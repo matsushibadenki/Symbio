@@ -215,6 +215,7 @@ impl Project {
                 {
                     return Err(Error::Invalid("cell".into()));
                 }
+                crate::structured::shape(&graph, c.root)?;
                 if c.source_format.parse(&mut graph, &c.source)? != c.root {
                     return Err(Error::Invalid("source/root mismatch".into()));
                 }
@@ -226,6 +227,9 @@ impl Project {
                         || o.conditions.iter().any(|s| s.len() > 256))
                 {
                     return Err(Error::Invalid("output".into()));
+                }
+                if let Some(r) = c.output.as_ref().and_then(|o| o.root) {
+                    crate::structured::shape(&graph, r)?;
                 }
             }
             if b.selected.is_some_and(|id| !seen.contains(&id)) {

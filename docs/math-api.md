@@ -42,7 +42,7 @@ cargo run --locked -p symbio-cli -- inspect /tmp/study.symbio
 | `math.rename` | `name` | Rename project |
 | `math.undo` / `math.redo` | none | Session-local history navigation; audit is retained |
 
-Transform operations: `simplify`, `differentiate`, `integrate`, `expand`, `evaluate`. The last operation requires numeric bindings for every symbol. Unsupported transforms return an error; they do not substitute guessed output.
+Transform operations: `compute` (alias of `simplify`), `simplify`, `differentiate`, `integrate`, `expand`, `evaluate`, `solve`, `determinant`, `inverse`, `transpose`. `compute` evaluates integral/derivative/finite aggregate nodes and matrix arithmetic; equations remain relations until `solve`. `evaluate` requires bindings for free symbols and returns float64 approximations, including matrix entries. Bound integration/summation variables are not free symbols. Indefinite integrals require choosing an integration constant before numeric evaluation. Unsupported transforms return an error; they do not substitute guessed output.
 
 ```json
 {"domain":"real","nonzero":true,"dimension":[1,2,-2]}
@@ -68,9 +68,9 @@ The [request schema](request.schema.json) documents the mutation envelope. CLI r
 
 ## LaTeX and source preservation
 
-`math.preview_latex` returns `{expression, mathml, symbols}` from an isolated Rust graph; it does not alter revisions, history, assumptions or the document arena. It checks supported syntax, not mathematical definedness. For example, previewing `\frac{1}{0}` renders a fraction, but evaluating it fails.
+`math.preview_latex` returns `{expression, mathml, symbols, kind}` from an isolated Rust graph; it does not alter revisions, history, assumptions or the document arena. It checks supported syntax, not mathematical definedness. For example, previewing `\frac{1}{0}` renders a fraction, but evaluating it fails.
 
-`math.define_latex` is a revision-checked mutation using the same envelope as `math.define`. It stores `source_format: "latex"`, the original LaTeX source and the parsed root. The result is an ordinary SEG consumed by `math.transform` and `math.inspect`, not a separate text-based calculator. Parsing or dimension errors roll back the transaction. Loading a file re-parses the source according to its format and checks the stored root. Existing v1 cells without `source_format` default to `expression`; new files are not promised readable by older binaries.
+`math.define_latex` is a revision-checked mutation using the same envelope as `math.define`. It stores `source_format: "latex"`, the original LaTeX source and the parsed root. The result is an ordinary SEG consumed by `math.transform` and `math.inspect`, not a separate text-based calculator. Parsing, shape or dimension errors roll back the transaction. Loading a file re-parses the source according to its format and checks the stored root. Existing v1 cells without `source_format` default to `expression`; new files are not promised readable by older binaries.
 
 See the README for the explicit grammar subset and limits. No TeX interpreter, network renderer or arbitrary macros run. Unsupported notation fails rather than being dropped. The desktop exposes the same pure operation as the `preview_latex` Tauri command, with debounce and outdated-response suppression in the WebView.
 
@@ -79,3 +79,9 @@ See the README for the explicit grammar subset and limits. No TeX interpreter, n
 Symbolic transforms return `symbolic`, precision `exact`, source conditions and engine identifier. `exact` means coefficients were not numerically rounded; it is not a formal proof. Float64 output returns `approximate` and explicitly no certified error bound. The current release never issues `verified` or `certified_numeric`. The `conjecture` enum is reserved; there is no conjecture-generation endpoint.
 
 History stores the last 256 commands with actor, branch, revision and engine, while the file stores full current branch contents. It is a bounded audit, not a complete event-sourced replay log. Exporting arbitrary source text does not execute shell, Python, Julia or network calls.
+
+## Structured computations
+
+`solve` accepts real single-variable rational-coefficient polynomials of degree at most two. It returns a `Solutions` node, including an empty set when there are no real roots. Infinite solution sets and complex solving are explicit unsupported cases. Matrix shapes are checked before commit; matrix size is limited to 8×8. Inverse and determinants above 2×2 require exact rational entries. Integral nodes retain the body, bound variable and paired optional limits. Finite aggregate nodes retain an integer range and sum/product flag (at most 256 terms). Unsupported antiderivatives fail without a partial mutation.
+
+Cell views also expose `kind`; inspect nodes include explicit `children` for graph traversal. The desktop-only pure `convert_source(source, from_format, to_format)` command converts through the SEG, refusing representations that would lose semantics. It does not mutate the document.
