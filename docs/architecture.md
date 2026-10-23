@@ -53,3 +53,7 @@ A future MCP gateway should invoke this core with explicit file/network grants; 
 Rust generates MathML with native fraction, integral limit, derivative, matrix-table and equation elements. WebViews handle typography, horizontal scrolling and a resizable focus view. No TeX macros or external renderer execute. The computation keyboard uses supported LaTeX templates; the supplied source palette remains available separately as reference notation in notes. Placeholder navigation is local editor state.
 
 `structured.rs` evaluates bounded exact matrix algorithms, finite sums/products, supported primitives and quadratic real solutions over the same graph. Indefinite primitives retain an arbitrary-constant condition and cannot silently become numeric results. Numerical structured results carry approximate trust and decimal MathML presentation. Input/output shapes are validated again when loading saved documents.
+
+## KOMYAKU source bridge
+
+`exchange.rs` exposes bounded, GUI-independent computation and single-equation `.symbio` export/import. The KOMYAKU desktop uses this crate as a sibling path dependency. Each request builds an isolated temporary Project with the caller's explicit assumptions, avoiding sample cells/default assumptions or other document content. Computed outputs remain derived data in KOMYAKU. Its Canonical source edits retain stable IDs and the existing Yjs/checkpoint pipeline. The adapter does not perform filesystem or network I/O.
