@@ -4,7 +4,7 @@ Environment: macOS / Apple Silicon, local development build. Verification used t
 
 ## Automated
 
-- `cargo test --locked --offline -p symbio-core -p symbio-cli -p symbio-desktop`: **30 passed** (12 mathematical/storage integration tests, 18 desktop/layout/placement/plot tests).
+- `cargo test --locked --offline -p symbio-core -p symbio-cli -p symbio-desktop`: **35 passed** (17 mathematical/LaTeX/storage integration tests, 18 desktop/layout/placement/plot tests).
 - `cargo clippy --locked --offline -p symbio-core -p symbio-cli -p symbio-desktop --all-targets -- -D warnings`: passed.
 - `cargo fmt --all --check`: passed.
 - `node --check apps/desktop/ui/app.js` and `dock.js`: passed.
@@ -36,7 +36,7 @@ Screenshots: [Japanese workspace](screenshots/workspace-ja.png), [English numeri
 
 No Windows/Linux execution, distribution signing/notarization, GPU device-loss test, physical multi-monitor unplug test, full cross-platform accessibility certification, broad CAS conformance suite or long-duration performance benchmark was performed. Proof/LLM/FLINT/Julia engines are not present, so no integration success is claimed for them. See the roadmap for explicit pending and future work.
 
-## Math keyboard addition
+## Initial math keyboard addition
 
 - `node --test scripts/math-keyboard.test.mjs`: **7 passed**. Covers selected numerator wrapping, denominator selection/replacement, roots/powers, original LaTeX snippets and placeholder focus, literal replacement characters, Unicode deletion, bounded undo/redo and redo-branch truncation.
 - JavaScript syntax checks and macOS `.app` rebuild passed; mathematical Rust code is unchanged.
@@ -54,6 +54,7 @@ No Windows/Linux execution, distribution signing/notarization, GPU device-loss t
 - CLI smoke covers `math.preview_latex` → `math.define_latex` → differentiate → explicit save → fresh-process reload.
 - Native UI: source format → LaTeX; enter `\frac{x^{3}+2x^{2}-5x}{2}`; live fraction/power preview; Differentiate → `3/2*x^2 + 2*x - 5/2`; inspector displays the same SEG. Incomplete `\frac{x}{` clears the preview and hides previous output without changing the document revision.
 - Native UI: unsupported `\int` note shows an explicit error. Replace with `\frac{1}{3}+\frac{1}{6}` → preview → + → separate LaTeX cell → Simplify → exact `1/2` → Save. The note and computational cell are both retained.
+- Native restart recovered LaTeX source formats, original sources, notes, derivative output and exact `1/2` output from disk.
 - [Native LaTeX calculation](screenshots/latex-seg-ja.png). UI text is translated in EN/JA/简体中文; the initial end-to-end interaction ran in English and the screenshot uses Japanese.
 
 Supported mathematical LaTeX is a documented subset, not a full TeX renderer or CAS importer. Preview checks syntax, not domain validity. Unimplemented integral/sum/matrix/equation notation remains an explicit error.

@@ -53,6 +53,8 @@ Open the keyboard icon below an expression to insert selection-aware templates. 
 
 ### LaTeX入力の対応範囲
 
+入力形式の切替は文法の選択です。既存の文字列を自動翻訳しないため、例えば `sin(x)` はLaTeXでは `\sin(x)` と入力してください。
+
 例：`\frac{x^{3}+2x^{2}-5x}{2}` → 数式プレビュー → 微分 → `3/2*x^2 + 2*x - 5/2`。
 
 - 四則演算、分数 `\frac{a}{b}`、根号 `\sqrt{x}`、累乗 `x^{2}`、暗黙の乗算 `2x`、丸／角／波括弧。
