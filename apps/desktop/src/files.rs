@@ -62,10 +62,15 @@ impl Session {
         if same_path(path, self.store.path()) {
             return self.save();
         }
+        let next = self
+            .generation
+            .checked_add(1)
+            .ok_or_else(|| error("resource_limit"))?;
         let mut destination = ProjectStore::open(path)?;
         destination.save(self.core.project())?;
         // Publish the new location only after a successful atomic save.
         self.store = destination;
+        self.generation = next;
         self.core.mark_saved();
         Ok(())
     }
@@ -321,4 +326,108 @@ fn path_for(app: &tauri::AppHandle) -> Result<PathBuf, UiError> {
         .store
         .path()
         .to_path_buf())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use symbio_core::{Command, Project, Request};
+    fn session(dir: &Path) -> Session {
+        let mut store = ProjectStore::open(dir.join("original.symbio")).unwrap();
+        let project = Project::new("Original").unwrap();
+        store.save(&project).unwrap();
+        Session::new(AppCore::new(project).unwrap(), store)
+    }
+    fn rename(s: &mut Session, name: &str) {
+        s.core
+            .apply(Request {
+                expected_revision: s.core.project().revision,
+                actor: "human".into(),
+                command: Command::Rename { name: name.into() },
+            })
+            .unwrap();
+    }
+    #[test]
+    fn save_as_preserves_source_and_undo_then_saves_to_new_location() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = session(dir.path());
+        let original = std::fs::read(s.store.path()).unwrap();
+        rename(&mut s, "Changed");
+        let path = dir.path().join("copy.symbio");
+        s.save_as(&path).unwrap();
+        assert!(!s.core.dirty());
+        assert!(s.core.snapshot().can_undo);
+        assert_eq!(
+            std::fs::read(dir.path().join("original.symbio")).unwrap(),
+            original
+        );
+        assert_eq!(s.store.path(), path);
+        assert!(s.check_generation(1).is_err());
+        assert!(s.check_generation(2).is_ok());
+        rename(&mut s, "New destination");
+        s.save().unwrap();
+        let p: Project = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(p.name, "New destination");
+        assert_eq!(
+            std::fs::read(dir.path().join("original.symbio")).unwrap(),
+            original
+        );
+    }
+    #[test]
+    fn failed_save_as_keeps_active_location_dirty_state_and_destination() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = session(dir.path());
+        rename(&mut s, "Unsaved");
+        let path = dir.path().join("locked.symbio");
+        let mut other = ProjectStore::open(&path).unwrap();
+        other.save(&Project::new("Other").unwrap()).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        assert_eq!(s.save_as(&path).unwrap_err().code, "project_locked");
+        assert!(s.core.dirty());
+        assert_eq!(s.generation, 1);
+        assert_eq!(s.store.path(), dir.path().join("original.symbio"));
+        assert_eq!(std::fs::read(path).unwrap(), before);
+        assert!(s.save_as(&dir.path().join("missing/copy.symbio")).is_err());
+    }
+    #[test]
+    fn same_path_saves_without_relocking_and_external_changes_are_protected() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = session(dir.path());
+        rename(&mut s, "Saved");
+        s.save_as(&dir.path().join("./original.symbio")).unwrap();
+        assert!(!s.core.dirty());
+        assert_eq!(s.generation, 1);
+        rename(&mut s, "Keep unsaved");
+        std::fs::write(s.store.path(), b"external edit").unwrap();
+        assert_eq!(s.save().unwrap_err().code, "external_change");
+        assert!(s.core.dirty());
+        assert_eq!(std::fs::read(s.store.path()).unwrap(), b"external edit");
+    }
+    #[test]
+    fn replacing_document_resets_undo_and_accepts_lower_revision() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = session(dir.path());
+        rename(&mut s, "Old edit");
+        let path = dir.path().join("another.symbio");
+        let mut store = ProjectStore::open(&path).unwrap();
+        store.save(&Project::new("Another").unwrap()).unwrap();
+        let p = store.load().unwrap().unwrap();
+        s.replace(AppCore::new(p).unwrap(), store).unwrap();
+        assert_eq!(s.core.project().name, "Another");
+        assert_eq!(s.core.project().revision, 0);
+        assert!(!s.core.snapshot().can_undo);
+        assert!(s.check_generation(1).is_err());
+        assert_eq!(s.snapshot().generation, 2);
+    }
+    #[test]
+    fn operation_guard_releases_on_error_and_prevents_overlapping_dialogs() {
+        let op = FileOperation::default();
+        {
+            let _guard = op.acquire().unwrap();
+            assert!(op.busy());
+            assert!(op.acquire().is_err());
+        }
+        assert!(!op.busy());
+        assert!(op.acquire().is_ok());
+    }
 }
