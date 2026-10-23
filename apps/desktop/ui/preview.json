@@ -1,0 +1,77 @@
+{
+  "project_id": "dccf0370-5e6a-41a3-8a2f-ed962edc9756",
+  "name": "Polynomial study",
+  "revision": 0,
+  "dirty": false,
+  "can_undo": false,
+  "can_redo": false,
+  "active": "main",
+  "branches": [
+    "main"
+  ],
+  "selected": 1,
+  "cells": [
+    {
+      "id": 1,
+      "name": "f",
+      "source": "x^3 + 2*x^2 - 5*x",
+      "root": 9,
+      "output": {
+        "root": 33,
+        "value": null,
+        "operation": "differentiate",
+        "trust": "symbolic",
+        "precision": "exact",
+        "conditions": [
+          "x: real"
+        ],
+        "engine": "symbio-rust/0.1.0"
+      },
+      "note": "",
+      "expression": "(((x ^ 3) + (2 * (x ^ 2))) - (5 * x))",
+      "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\" display=\"block\"><mrow><mrow><msup><mi>x</mi><mn>3</mn></msup><mo>+</mo><mrow><mn>2</mn><mo>·</mo><msup><mi>x</mi><mn>2</mn></msup></mrow></mrow><mo>−</mo><mrow><mn>5</mn><mo>·</mo><mi>x</mi></mrow></mrow></math>",
+      "result_text": "(((3 * (x ^ 2)) + (4 * x)) - 5)",
+      "result_mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\" display=\"block\"><mrow><mrow><mrow><mn>3</mn><mo>·</mo><msup><mi>x</mi><mn>2</mn></msup></mrow><mo>+</mo><mrow><mn>4</mn><mo>·</mo><mi>x</mi></mrow></mrow><mo>−</mo><mn>5</mn></mrow></math>",
+      "symbols": [
+        "x"
+      ],
+      "dimension": null
+    },
+    {
+      "id": 2,
+      "name": "g",
+      "source": "sqrt(x^2)",
+      "root": 10,
+      "output": {
+        "root": 34,
+        "value": null,
+        "operation": "simplify",
+        "trust": "symbolic",
+        "precision": "exact",
+        "conditions": [
+          "x: real"
+        ],
+        "engine": "symbio-rust/0.1.0"
+      },
+      "note": "",
+      "expression": "sqrt((x ^ 2))",
+      "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\" display=\"block\"><msqrt><msup><mi>x</mi><mn>2</mn></msup></msqrt></math>",
+      "result_text": "abs(x)",
+      "result_mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\" display=\"block\"><mrow><mo>|</mo><mi>x</mi><mo>|</mo></mrow></math>",
+      "symbols": [
+        "x"
+      ],
+      "dimension": null
+    }
+  ],
+  "assumptions": {
+    "x": {
+      "domain": "real",
+      "nonzero": false,
+      "dimension": null
+    }
+  },
+  "history": [],
+  "node_count": 35,
+  "engine": "symbio-rust/0.1.0"
+}

@@ -1,0 +1,15 @@
+{
+  "retrieved": "2026-10-23",
+  "html_source": "/Users/littlebuddha/Desktop/mathkeyboard.html",
+  "script_source": "https://xs927991.xsrv.jp/math-keyboard/script.js",
+  "files": [
+    {
+      "path": "vendor/mathkeyboard/index.html",
+      "sha256": "a36e3ec5241f8fa759a8ce8839d622db01ba8e6899d1b89bbe2f0800c117d0ed"
+    },
+    {
+      "path": "vendor/mathkeyboard/script.js",
+      "sha256": "666f379cbc1f720aa54df09303533c16cae91ef4ed9099dbea5ce44840e90d47"
+    }
+  ]
+}

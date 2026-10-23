@@ -1,0 +1,140 @@
+[
+  {
+    "file": "vendor/threex/crates/core/Cargo.toml",
+    "source": "/Users/Shared/Program/Tauri/ATOM/vendor/threex/crates/core/Cargo.toml",
+    "sha256": "4bc92de16a9bfa12a64c6e18df00044a972291a71b4c813e650e19c8a154eed0",
+    "unchanged": true
+  },
+  {
+    "file": "vendor/threex/crates/core/src/camera.rs",
+    "source": "/Users/Shared/Program/Tauri/ATOM/vendor/threex/crates/core/src/camera.rs",
+    "sha256": "497116bd2591d8749a23d525704dbe08d5e6a78e6e5e98ac7a2c993eb23f5372",
+    "unchanged": true
+  },
+  {
+    "file": "vendor/threex/crates/core/src/checkpoint.rs",
+    "source": "/Users/Shared/Program/Tauri/ATOM/vendor/threex/crates/core/src/checkpoint.rs",
+    "sha256": "b23924928f04d425f7838aa070dd3ba7ef0806fed1024fe7c8a7dcc4fe30fb0c",
+    "unchanged": true
+  },
+  {
+    "file": "vendor/threex/crates/core/src/content_hash.rs",
+    "source": "/Users/Shared/Program/Tauri/ATOM/vendor/threex/crates/core/src/content_hash.rs",
+    "sha256": "ed25d8b536416326dcfe3015ac59b80b3e8364d53e9185163dd004215d1c4695",
+    "unchanged": true
+  },
+  {
+    "file": "vendor/threex/crates/core/src/document.rs",
+    "source": "/Users/Shared/Program/Tauri/ATOM/vendor/threex/crates/core/src/document.rs",
+    "sha256": "f76d68a4283bcd9a961b560d735f22a53aa767163a0eafe9df69d1bfabff6100",
+    "unchanged": true
+  },
+  {
+    "file": "vendor/threex/crates/core/src/geometry.rs",
+    "source": "/Users/Shared/Program/Tauri/ATOM/vendor/threex/crates/core/src/geometry.rs",
+    "sha256": "4307cce0e8b81c0d46a45019b9fe7e570d6f727f5114cbddcbbb0e2d18db3aec",
+    "unchanged": true
+  },
+  {
+    "file": "vendor/threex/crates/core/src/instance_updates.rs",
+    "source": "/Users/Shared/Program/Tauri/ATOM/vendor/threex/crates/core/src/instance_updates.rs",
+    "sha256": "f19544a8696c04f4a258e170d14787632029861ce2a1b90acad706192b512fef",
+    "unchanged": true
+  },
+  {
+    "file": "vendor/threex/crates/core/src/lib.rs",
+    "source": "/Users/Shared/Program/Tauri/ATOM/vendor/threex/crates/core/src/lib.rs",
+    "sha256": "f3e63d392ad212b1bb6e295183fbba240100e2565970d0d3fa7818e042ba3a2a",
+    "unchanged": true
+  },
+  {
+    "file": "vendor/threex/crates/core/src/request.rs",
+    "source": "/Users/Shared/Program/Tauri/ATOM/vendor/threex/crates/core/src/request.rs",
+    "sha256": "b9a419f9a07812e1b96ad091f00bec361d7eb3f50c148e13f975347018eef7f4",
+    "unchanged": true
+  },
+  {
+    "file": "vendor/threex/crates/core/src/scene.rs",
+    "source": "/Users/Shared/Program/Tauri/ATOM/vendor/threex/crates/core/src/scene.rs",
+    "sha256": "b61b7e62be5901452bf72951cc0b8f6c20690dccb393c407d65805eee0c34e60",
+    "unchanged": true
+  },
+  {
+    "file": "vendor/threex/crates/core/src/transform_store.rs",
+    "source": "/Users/Shared/Program/Tauri/ATOM/vendor/threex/crates/core/src/transform_store.rs",
+    "sha256": "ff2596d577b87e4610e8680bccb34aa7a0ab2ba340743ae68360149dbce9367a",
+    "unchanged": true
+  },
+  {
+    "file": "vendor/threex/crates/renderer/Cargo.toml",
+    "source": "/Users/Shared/Program/Tauri/ATOM/vendor/threex/crates/renderer/Cargo.toml",
+    "sha256": "6669505e8118799828c7eb15ca805e7c0a9881d249f53d449a763c49f791b57e",
+    "unchanged": true
+  },
+  {
+    "file": "vendor/threex/crates/renderer/src/batching.rs",
+    "source": "/Users/Shared/Program/Tauri/ATOM/vendor/threex/crates/renderer/src/batching.rs",
+    "sha256": "7df7c5d4a2bf06a702aeee4106c9bd5f6d711e3c8ce2bcb64e990abb115618b9",
+    "unchanged": true
+  },
+  {
+    "file": "vendor/threex/crates/renderer/src/cube.wgsl",
+    "source": "/Users/Shared/Program/Tauri/ATOM/vendor/threex/crates/renderer/src/cube.wgsl",
+    "sha256": "80f75cd3c39f9568e70fd9d11273fdb0a8c5567f842bac6bd1bae5755f80da71",
+    "unchanged": true
+  },
+  {
+    "file": "vendor/threex/crates/renderer/src/gather.rs",
+    "source": "/Users/Shared/Program/Tauri/ATOM/vendor/threex/crates/renderer/src/gather.rs",
+    "sha256": "2110c9c0efaac171a72085dc95ddf7c1878ca4cd31274d4949942b0ef8d43dd9",
+    "unchanged": true
+  },
+  {
+    "file": "vendor/threex/crates/renderer/src/gather.wgsl",
+    "source": "/Users/Shared/Program/Tauri/ATOM/vendor/threex/crates/renderer/src/gather.wgsl",
+    "sha256": "71b8a272cf5d23b2de77193d26199cd6927e05c4c3b44d0108196e00f22f0e6b",
+    "unchanged": true
+  },
+  {
+    "file": "vendor/threex/crates/renderer/src/geometry.rs",
+    "source": "/Users/Shared/Program/Tauri/ATOM/vendor/threex/crates/renderer/src/geometry.rs",
+    "sha256": "5b73ae134feb777778dd7c35c2ea663540581a503e08d592ba48e7556ae39587",
+    "unchanged": true
+  },
+  {
+    "file": "vendor/threex/crates/renderer/src/guides.rs",
+    "source": "/Users/Shared/Program/Tauri/ATOM/vendor/threex/crates/renderer/src/guides.rs",
+    "sha256": "93882fde102544b6f94180940e6511002a9d541b90322f91d80903fb5b1e0187",
+    "unchanged": true
+  },
+  {
+    "file": "vendor/threex/crates/renderer/src/guides.wgsl",
+    "source": "/Users/Shared/Program/Tauri/ATOM/vendor/threex/crates/renderer/src/guides.wgsl",
+    "sha256": "eee105eb225e90110c5f1de193c8a4beb335445377754228661de22d4b3d2690",
+    "unchanged": true
+  },
+  {
+    "file": "vendor/threex/crates/renderer/src/lib.rs",
+    "source": "/Users/Shared/Program/Tauri/ATOM/vendor/threex/crates/renderer/src/lib.rs",
+    "sha256": "6a67077afa06db9f620ded08160466f93390af940d5522ac5e48126a58113f28",
+    "unchanged": true
+  },
+  {
+    "file": "vendor/threex/crates/renderer/src/mesh_resources.rs",
+    "source": "/Users/Shared/Program/Tauri/ATOM/vendor/threex/crates/renderer/src/mesh_resources.rs",
+    "sha256": "a081d8feb65df95256bb90f2d97f23b9804c805409cb75f921b03f1b2fbc0bf4",
+    "unchanged": true
+  },
+  {
+    "file": "vendor/threex/crates/renderer/src/native.rs",
+    "source": "/Users/Shared/Program/Tauri/ATOM/vendor/threex/crates/renderer/src/native.rs",
+    "sha256": "40a25da17c8b1f6943b33c4e2e878c7e703671c0153b08aa69ac7fae48461ccf",
+    "unchanged": true
+  },
+  {
+    "file": "vendor/threex/crates/renderer/src/region_tests.rs",
+    "source": "/Users/Shared/Program/Tauri/ATOM/vendor/threex/crates/renderer/src/region_tests.rs",
+    "sha256": "d217d708c27907ba6705a0cb05b808d491bf7700ed78b6dd126bcb9c502aceb7",
+    "unchanged": true
+  }
+]

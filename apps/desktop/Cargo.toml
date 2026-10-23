@@ -1,0 +1,18 @@
+[package]
+name = "symbio-desktop"
+version = "0.1.0"
+edition = "2024"
+build = "build.rs"
+[build-dependencies]
+tauri-build = "=2.7.3"
+[dependencies]
+symbio-core = { path = "../../crates/symbio-core" }
+tauri = { version = "=2.12.4", features = ["unstable"] }
+serde.workspace = true
+serde_json.workspace = true
+wgpu.workspace = true
+threex-core = { path = "../../vendor/threex/crates/core" }
+threex-renderer = { path = "../../vendor/threex/crates/renderer" }
+tempfile = "3.27"
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSWindow", "NSView"] }

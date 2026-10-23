@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+members = ["crates/symbio-core", "crates/symbio-cli", "apps/desktop", "vendor/threex/crates/core", "vendor/threex/crates/renderer"]
+default-members = ["crates/symbio-core", "crates/symbio-cli"]
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+wgpu = "=27.0.1"
+bytemuck = { version = "1.25", features = ["derive"] }
+[profile.release]
+lto = "thin"
+codegen-units = 1

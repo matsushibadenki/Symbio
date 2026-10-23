@@ -1,0 +1,340 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Symbio mutation request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "expected_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 18446744073709551615
+    },
+    "actor": {
+      "enum": [
+        "human",
+        "ai"
+      ]
+    },
+    "command": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "method": {
+              "const": "math.define"
+            },
+            "id": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 18446744073709551615
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "name": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+              "minLength": 1,
+              "maxLength": 48
+            },
+            "source": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            }
+          },
+          "required": [
+            "method",
+            "name",
+            "source"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "method": {
+              "const": "math.define_latex"
+            },
+            "id": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 18446744073709551615
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "name": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+              "minLength": 1,
+              "maxLength": 48
+            },
+            "source": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            }
+          },
+          "required": [
+            "method",
+            "name",
+            "source"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "method": {
+              "const": "math.assume"
+            },
+            "symbol": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+              "minLength": 1,
+              "maxLength": 48
+            },
+            "assumption": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "domain": {
+                  "enum": [
+                    "unspecified",
+                    "real",
+                    "nonnegative",
+                    "positive",
+                    "complex"
+                  ]
+                },
+                "nonzero": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "dimension": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "minimum": -16,
+                        "maximum": 16
+                      },
+                      "minItems": 3,
+                      "maxItems": 3
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "domain"
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "symbol",
+            "assumption"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "method": {
+              "const": "math.transform"
+            },
+            "id": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 18446744073709551615
+            },
+            "operation": {
+              "enum": [
+                "simplify",
+                "differentiate",
+                "integrate",
+                "expand",
+                "evaluate"
+              ]
+            },
+            "variable": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+              "minLength": 1,
+              "maxLength": 48
+            },
+            "bindings": {
+              "type": "object",
+              "maxProperties": 64,
+              "additionalProperties": {
+                "type": "number"
+              }
+            }
+          },
+          "required": [
+            "method",
+            "id",
+            "operation",
+            "variable"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "method": {
+              "const": "math.select"
+            },
+            "id": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 18446744073709551615
+            }
+          },
+          "required": [
+            "method",
+            "id"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "method": {
+              "const": "math.remove"
+            },
+            "id": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 18446744073709551615
+            }
+          },
+          "required": [
+            "method",
+            "id"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "method": {
+              "const": "math.note"
+            },
+            "id": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 18446744073709551615
+            },
+            "text": {
+              "type": "string",
+              "maxLength": 4096
+            }
+          },
+          "required": [
+            "method",
+            "id",
+            "text"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "method": {
+              "const": "math.branch"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          "required": [
+            "method",
+            "name"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "method": {
+              "const": "math.checkout"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          "required": [
+            "method",
+            "name"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "method": {
+              "const": "math.rename"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          "required": [
+            "method",
+            "name"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "method": {
+              "const": "math.undo"
+            }
+          },
+          "required": [
+            "method"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "method": {
+              "const": "math.redo"
+            }
+          },
+          "required": [
+            "method"
+          ]
+        }
+      ]
+    }
+  },
+  "required": [
+    "expected_revision",
+    "actor",
+    "command"
+  ]
+}

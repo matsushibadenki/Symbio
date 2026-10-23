@@ -1,0 +1,104 @@
+<!-- /math-keyboard/index.html -->
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>数学入力キーボード</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+  <link rel="stylesheet" href="./styles.css" />
+  <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['\\(', '\\)']],
+        displayMath: [['\\[', '\\]']]
+      },
+      svg: { fontCache: 'global' }
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+  <script defer src="./script.js"></script>
+<!-- BEGIN DISCOVERY -->
+<link rel="canonical" href="https://xs927991.xsrv.jp/math-keyboard/">
+<meta property="og:url" content="https://xs927991.xsrv.jp/math-keyboard/">
+<script type="application/ld+json">{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebPage",
+      "url": "https://xs927991.xsrv.jp/math-keyboard/",
+      "name": "数学入力キーボード",
+      "inLanguage": "ja"
+    }
+  ]
+}</script>
+<!-- END DISCOVERY -->
+</head>
+<body>
+  <main class="page-shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">MATHEMATICAL INPUT SYSTEM</p>
+        <h1>数学入力を、もっと直感的に。</h1>
+        <p class="lead">数式をスムーズに入力できる、LaTeX / MathML対応の専用キーボード</p>
+      </div>
+      <div class="feature-strip" aria-label="主な機能">
+        <article><span class="feature-icon">√x</span><div><b>直感的な記号入力</b><small>よく使う数学記号をワンタッチ</small></div></article>
+        <article><span class="feature-icon">a⁄b</span><div><b>構造入力をサポート</b><small>分数・根号・積分などを素早く構築</small></div></article>
+        <article><span class="feature-icon mini">LaTeX<br>MathML</span><div><b>LaTeX / MathML 対応</b><small>出力形式を選択してコピー可能</small></div></article>
+      </div>
+    </header>
+
+    <section class="editor-panel" aria-label="数式エディター">
+      <div class="editor-toolbar">
+        <div class="segmented" role="group" aria-label="出力形式">
+          <button class="format-button active" data-format="latex">LaTeX</button>
+          <button class="format-button" data-format="mathml">MathML</button>
+        </div>
+        <div class="editor-actions">
+          <button id="undoTop" class="ghost-button" type="button">↶ Undo</button>
+          <button id="redoTop" class="ghost-button" type="button">↷ Redo</button>
+          <button id="clearButton" class="ghost-button danger" type="button">Clear</button>
+        </div>
+      </div>
+
+      <label for="mathInput" class="field-label">入力欄</label>
+      <textarea id="mathInput" spellcheck="false" aria-label="LaTeX入力欄">\\frac{a}{b} + \\int_0^1 x^2 \\, dx</textarea>
+
+      <div class="preview-header">
+        <span>プレビュー</span>
+        <span id="statusText">LaTeX</span>
+      </div>
+      <div id="mathPreview" class="math-preview" aria-live="polite"></div>
+      <pre id="mathMlPreview" class="mathml-preview" hidden></pre>
+    </section>
+
+    <section class="keyboard-shell" aria-label="数学キーボード">
+      <div id="keyboard" class="keyboard"></div>
+    </section>
+
+    <section class="footer-grid">
+      <article>
+        <h2>主な特徴</h2>
+        <ul>
+          <li>複雑な数式構造をワンタッチで入力</li>
+          <li>LaTeX / MathML を切り替えてコピー</li>
+          <li>モード別に記号へすぐアクセス</li>
+          <li>入力履歴から Undo / Redo</li>
+        </ul>
+      </article>
+      <article>
+        <h2>操作</h2>
+        <p>記号キーを押すと、カーソル位置へコードを挿入します。分数や根号などのテンプレートは、入力後に選択部分へフォーカスします。</p>
+      </article>
+      <article>
+        <h2>カラーパネル</h2>
+        <div class="legend"><span class="swatch basic"></span>基本記号</div>
+        <div class="legend"><span class="swatch calculus"></span>微積分・極限</div>
+        <div class="legend"><span class="swatch nav"></span>ナビゲーション</div>
+        <div class="legend"><span class="swatch function"></span>機能キー</div>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

@@ -1,0 +1,7 @@
+{"method":"math.inspect"}
+{"expected_revision":0,"actor":"human","command":{"method":"math.transform","id":1,"operation":"differentiate","variable":"x"}}
+{"expected_revision":1,"actor":"ai","command":{"method":"math.branch","name":"positive-x"}}
+{"expected_revision":2,"actor":"ai","command":{"method":"math.assume","symbol":"x","assumption":{"domain":"positive","nonzero":true,"dimension":null}}}
+{"expected_revision":3,"actor":"ai","command":{"method":"math.transform","id":2,"operation":"simplify","variable":"x"}}
+{"method":"math.inspect","id":2}
+{"method":"math.save"}

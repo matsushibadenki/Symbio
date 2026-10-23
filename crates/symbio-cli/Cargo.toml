@@ -1,0 +1,7 @@
+[package]
+name = "symbio-cli"
+version = "0.1.0"
+edition = "2024"
+[dependencies]
+symbio-core = { path = "../symbio-core" }
+serde_json.workspace = true
