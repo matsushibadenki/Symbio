@@ -1,1 +1,1 @@
-{"main":{"identifier":"main","description":"Local child panels with stable identities","local":true,"webviews":["toolbar","objects","notebook","inspector","split-0","split-1"],"permissions":["core:event:allow-listen","core:event:allow-unlisten"]}}
+{"main":{"identifier":"main","description":"Local child panels with stable identities","local":true,"webviews":["toolbar","objects","notebook","inspector","split-0","split-1","dependencies","surface","split-2"],"permissions":["core:event:allow-listen","core:event:allow-unlisten"]}}

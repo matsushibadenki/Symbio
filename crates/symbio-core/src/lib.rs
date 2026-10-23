@@ -1,5 +1,6 @@
 //! Symbio's UI-independent owner: all operations are revision-checked transactions.
 pub mod algebra;
+pub mod dependencies;
 pub mod exchange;
 pub mod graph;
 pub mod latex;
@@ -11,11 +12,15 @@ pub use model::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 pub use storage::ProjectStore;
-pub const ENGINE: &str = "symbio-rust/0.2.0";
+pub const ENGINE: &str = "symbio-rust/0.3.0";
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("revision conflict")]
     Conflict,
+    #[error("missing cell reference: {0}")]
+    MissingReference(String),
+    #[error("cyclic cell dependency")]
+    DependencyCycle,
     #[error("unsupported project version")]
     Version,
     #[error("invalid project: {0}")]
@@ -42,6 +47,8 @@ pub enum Error {
 impl Error {
     pub fn code(&self) -> &'static str {
         match self {
+            Self::MissingReference(_) => "missing_reference",
+            Self::DependencyCycle => "dependency_cycle",
             Self::Conflict => "revision_conflict",
             Self::Version => "unsupported_version",
             Self::Invalid(_) => "invalid_project",
@@ -78,6 +85,8 @@ pub enum Command {
         symbol: String,
         assumption: Assumption,
     },
+    #[serde(rename = "math.recalculate")]
+    Recalculate { id: Option<u64> },
     #[serde(rename = "math.transform")]
     Transform {
         id: u64,
@@ -121,6 +130,10 @@ pub struct CellView {
     pub result_mathml: Option<String>,
     pub symbols: Vec<String>,
     pub dimension: Option<[i32; 3]>,
+    pub dependencies: Vec<u64>,
+    pub dependents: Vec<u64>,
+    pub resolved_expression: String,
+    pub resolved_mathml: String,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct Snapshot {
@@ -138,6 +151,8 @@ pub struct Snapshot {
     pub history: Vec<Event>,
     pub node_count: usize,
     pub engine: String,
+    pub dependencies: Vec<dependencies::DependencyEdge>,
+    pub calculation_order: Vec<u64>,
 }
 pub struct AppCore {
     project: Project,
@@ -149,6 +164,55 @@ impl AppCore {
     pub fn new(mut project: Project) -> Result<Self> {
         project.validate()?;
         project.graph.rebuild()?;
+        // Recover legacy recipes only when the audit records their actual parameters.
+        // Parameter-free operations can also be reconstructed from their output label.
+        for (name, branch) in &mut project.branches {
+            for cell in &mut branch.cells {
+                if cell.calculation.is_some() {
+                    continue;
+                }
+                let Some(output) = &cell.output else {
+                    continue;
+                };
+                let recorded = project
+                    .history
+                    .iter()
+                    .rev()
+                    .filter(|event| event.branch == *name)
+                    .filter_map(|event| {
+                        serde_json::from_value::<Command>(event.command.clone()).ok()
+                    })
+                    .take_while(|command| !matches!(command, Command::Undo | Command::Redo))
+                    .find_map(|command| match command {
+                        Command::Transform {
+                            id,
+                            operation,
+                            variable,
+                            bindings,
+                        } if id == cell.id && operation == output.operation => Some(Calculation {
+                            operation,
+                            variable,
+                            bindings,
+                        }),
+                        _ => None,
+                    });
+                cell.calculation = recorded.or_else(|| {
+                    ["compute", "simplify", "determinant", "inverse", "transpose"]
+                        .contains(&output.operation.as_str())
+                        .then(|| Calculation {
+                            operation: output.operation.clone(),
+                            ..Default::default()
+                        })
+                });
+            }
+        }
+        let active = project.active.clone();
+        for branch in project.branches.keys().cloned().collect::<Vec<_>>() {
+            project.active = branch;
+            dependencies::resolve_current(&mut project)?;
+        }
+        project.active = active;
+        project.validate()?;
         let saved = serde_json::to_vec(&project)?;
         Ok(Self {
             project,
@@ -169,6 +233,8 @@ impl AppCore {
     pub fn snapshot(&self) -> Snapshot {
         let p = &self.project;
         let b = p.current();
+        let dag =
+            dependencies::DependencyGraph::build(&p.graph, b).expect("validated dependencies");
         Snapshot {
             project_id: p.id,
             name: p.name.clone(),
@@ -184,7 +250,7 @@ impl AppCore {
                 .iter()
                 .map(|c| CellView {
                     cell: c.clone(),
-                    kind: structured::kind(&p.graph, c.root).into(),
+                    kind: structured::kind(&p.graph, c.resolved_root.unwrap_or(c.root)).into(),
                     expression: p.graph.text(c.root),
                     mathml: p.graph.mathml(c.root),
                     result_text: c.output.as_ref().map(|o| {
@@ -201,16 +267,36 @@ impl AppCore {
                             }
                         })
                     }),
-                    symbols: p.graph.symbols(c.root).into_iter().collect(),
-                    dimension: algebra::dimension(&p.graph, c.root, &b.assumptions, 0)
-                        .ok()
-                        .flatten(),
+                    dependencies: dag.inputs[&c.id].clone(),
+                    dependents: dag
+                        .inputs
+                        .iter()
+                        .filter(|(_, deps)| deps.contains(&c.id))
+                        .map(|(id, _)| *id)
+                        .collect(),
+                    resolved_expression: p.graph.text(c.resolved_root.unwrap_or(c.root)),
+                    resolved_mathml: p.graph.mathml(c.resolved_root.unwrap_or(c.root)),
+                    symbols: p
+                        .graph
+                        .symbols(c.resolved_root.unwrap_or(c.root))
+                        .into_iter()
+                        .collect(),
+                    dimension: algebra::dimension(
+                        &p.graph,
+                        c.resolved_root.unwrap_or(c.root),
+                        &b.assumptions,
+                        0,
+                    )
+                    .ok()
+                    .flatten(),
                 })
                 .collect(),
             assumptions: b.assumptions.clone(),
             history: p.history.iter().rev().take(32).cloned().collect(),
             node_count: p.graph.nodes.len(),
             engine: ENGINE.into(),
+            dependencies: dag.edges(),
+            calculation_order: dag.order,
         }
     }
     pub fn apply(&mut self, request: Request) -> Result<Snapshot> {
@@ -261,6 +347,28 @@ impl AppCore {
         self.project = next;
         Ok(self.snapshot())
     }
+    pub fn preview_latex(&self, source: &str, id: Option<u64>) -> Result<latex::Preview> {
+        let mut graph = self.project.graph.clone();
+        let root = latex::parse(&mut graph, source)?;
+        let mut branch = self.project.current().clone();
+        if let Some(id) = id {
+            let cell = branch
+                .cells
+                .iter_mut()
+                .find(|c| c.id == id)
+                .ok_or_else(|| Error::Invalid("cell".into()))?;
+            cell.root = root;
+        }
+        dependencies::DependencyGraph::build(&graph, &branch)?;
+        let resolved = dependencies::resolve(&mut graph, &branch, root)?;
+        structured::shape(&graph, resolved)?;
+        Ok(latex::Preview {
+            expression: graph.text(root),
+            mathml: graph.mathml(root),
+            symbols: graph.symbols(resolved).into_iter().collect(),
+            kind: structured::kind(&graph, resolved).into(),
+        })
+    }
     pub fn inspect(&self, id: u64) -> Result<serde_json::Value> {
         let cell = self
             .project
@@ -271,6 +379,7 @@ impl AppCore {
             .ok_or_else(|| Error::Invalid("cell".into()))?;
         let mut seen = std::collections::BTreeSet::new();
         let mut pending = vec![cell.root];
+        pending.extend(cell.resolved_root);
         if let Some(root) = cell.output.as_ref().and_then(|o| o.root) {
             pending.push(root)
         }
@@ -296,8 +405,10 @@ fn execute(p: &mut Project, command: &Command) -> Result<()> {
                 return Err(Error::Invalid("name".into()));
             }
             let root = source_format.parse(&mut p.graph, source)?;
-            structured::shape(&p.graph, root)?;
-            algebra::dimension(&p.graph, root, &p.current().assumptions, 0)?;
+            if dependencies::references(&p.graph, root).is_empty() {
+                structured::shape(&p.graph, root)?;
+                algebra::dimension(&p.graph, root, &p.current().assumptions, 0)?;
+            }
             if p.current()
                 .cells
                 .iter()
@@ -305,7 +416,18 @@ fn execute(p: &mut Project, command: &Command) -> Result<()> {
             {
                 return Err(Error::Invalid("duplicate name".into()));
             }
+            let mut changed_id = p.next_cell;
             if let Some(id) = id {
+                changed_id = *id;
+                let old = p
+                    .current()
+                    .cells
+                    .iter()
+                    .find(|c| c.id == *id)
+                    .ok_or_else(|| Error::Invalid("cell".into()))?
+                    .name
+                    .clone();
+                dependencies::rename_sources(p, &old, name)?;
                 let c = p
                     .current_mut()
                     .cells
@@ -327,10 +449,15 @@ fn execute(p: &mut Project, command: &Command) -> Result<()> {
                     source_format,
                     root,
                     output: None,
+                    calculation: Some(Calculation::default()),
+                    calculation_error: None,
+                    calculated_revision: None,
+                    resolved_root: None,
                     note: String::new(),
                 });
                 p.current_mut().selected = Some(id);
             }
+            dependencies::recalculate(p, std::collections::BTreeSet::from([changed_id]))?;
         }
         Command::Assume { symbol, assumption } => {
             if !graph::valid_symbol(symbol) {
@@ -339,9 +466,19 @@ fn execute(p: &mut Project, command: &Command) -> Result<()> {
             p.current_mut()
                 .assumptions
                 .insert(symbol.clone(), assumption.clone());
-            for c in &mut p.current_mut().cells {
-                c.output = None;
-            }
+            let affected = dependencies::assumption_users(p, symbol);
+            dependencies::recalculate(p, affected)?;
+        }
+        Command::Recalculate { id } => {
+            let seeds = if let Some(id) = id {
+                if !p.current().cells.iter().any(|c| c.id == *id) {
+                    return Err(Error::Invalid("cell".into()));
+                }
+                std::collections::BTreeSet::from([*id])
+            } else {
+                p.current().cells.iter().map(|c| c.id).collect()
+            };
+            dependencies::recalculate(p, seeds)?;
         }
         Command::Transform {
             id,
@@ -352,13 +489,17 @@ fn execute(p: &mut Project, command: &Command) -> Result<()> {
             if !graph::valid_symbol(variable) {
                 return Err(Error::Invalid("variable".into()));
             }
+            dependencies::resolve_current(p)?;
             let root = p
                 .current()
                 .cells
                 .iter()
                 .find(|c| c.id == *id)
                 .ok_or_else(|| Error::Invalid("cell".into()))?
-                .root;
+                .resolved_root
+                .unwrap();
+            structured::shape(&p.graph, root)?;
+            algebra::dimension(&p.graph, root, &p.current().assumptions, 0)?;
             let assumptions = p.current().assumptions.clone();
             let mut conditions: Vec<String> = assumptions
                 .iter()
@@ -491,12 +632,21 @@ fn execute(p: &mut Project, command: &Command) -> Result<()> {
                 conditions,
                 engine: ENGINE.into(),
             };
-            p.current_mut()
+            let revision = p.revision.checked_add(1).ok_or(Error::Limit)?;
+            let c = p
+                .current_mut()
                 .cells
                 .iter_mut()
                 .find(|c| c.id == *id)
-                .unwrap()
-                .output = Some(output);
+                .unwrap();
+            c.output = Some(output);
+            c.calculation_error = None;
+            c.calculated_revision = Some(revision);
+            c.calculation = Some(Calculation {
+                operation: operation.clone(),
+                variable: variable.clone(),
+                bindings: bindings.clone(),
+            });
             p.current_mut().selected = Some(*id);
         }
         Command::Select { id } => {

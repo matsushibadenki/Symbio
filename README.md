@@ -1,6 +1,7 @@
 # Symbio · Symbolic Intelligence Workbench
 
 <img src="docs/images/symbio-image.png">
+<img src="docs/images/symbio-image2.png">
 
 Symbio is an early mathematical workbench built with Tauri 2 and Rust. It keeps mathematical meaning, assumptions and research history together, with the same Rust kernel serving both the desktop UI and CLI. It reuses ThreeX's wgpu renderer and ATOM's native panel infrastructure.
 
@@ -66,6 +67,32 @@ Example: `\frac{x^{3}+2x^{2}-5x}{2}` → formula preview → differentiation →
 
 MathML typesets fractions, integral limits, matrices and equations. The formula focus view provides adjustable display size. Long formulas scroll horizontally instead of breaking across lines.
 
+## Cell references and automatic recalculation
+
+Reference another cell's authored definition with `@name` in Expression mode or `\cell{name}` in LaTeX mode. Cell names and ordinary variables are separate: `x` is a variable, while `@x` refers to the cell named `x`.
+
+| Cell | Expression source | Initial result |
+| --- | --- | --- |
+| `a` | `2` | `2` |
+| `b` | `@a+3` | `5` |
+| `c` | `@a*@b` | `10` |
+
+Apply `4` to `a`, and `b` becomes `7` while `c` becomes `28`. References expand definitions before transformation, so a consumer can differentiate or integrate a referenced formula, for example `\frac{d}{dx}(\cell{f})`. Integral and sum variables retain their surrounding scope.
+
+The inspector displays a directed cell dependency graph. Arrows point from a definition to its consumers. Select a node to inspect it, open the graph in a separate native window with adjustable zoom, or use the recalculation button to run all cells. Each cell also shows its direct references, an expandable resolved definition and the revision of its latest calculation attempt.
+
+Applying source or assumption edits recalculates affected cells in dependency order, reusing their saved operation, variable and numeric bindings. Independent cells retain their results. New definitions default to Compute. Calculation recipes and error states persist across saves and branches. Older documents recover recipes from their audit history when the original parameters are available; otherwise select an operation once to establish a reproducible recipe.
+
+Missing references, cycles, duplicate names and deletion of referenced cells are rejected atomically. Renaming a cell updates its reference tokens while preserving cell IDs and ordinary variables. If automatic recalculation encounters a mathematical or unsupported-operation error, the edited definition remains available, affected stale outputs are cleared and an error is shown. Correcting the inputs or assumptions retries the saved calculation. Resource-limit failures roll back the edit. Pending editor drafts are applied explicitly before they affect other cells.
+
+## 3D surfaces in the central workspace
+
+The default workspace has three columns: Objects on the left, a wide Notebook / 3D tab group in the center, and Structure & history on the right. Notebook is initially selected. Both central panels can still be split, docked or floated independently. Use **Reset workspace** to apply this default to an existing saved layout. Select a cell from its menu, use a cell's cube button, or press **+** to add a `sin(x) cos(y)` example. Expression / LaTeX definitions and resolved cell references use the same SEG as computation. Scalar expressions are shown as `z = f(x, y)`; explicit equations such as `z=x^2-y^2` are also accepted.
+
+Drag to orbit and scroll to zoom. Arrow keys rotate, **+ / −** zoom, and **Home** resets the camera. The two range fields set the common x/y interval. The grid button toggles surface lines and coordinate axes. Applying formula, reference or assumption changes regenerates the selected surface automatically; uncommitted drafts do not change it.
+
+Rust samples a bounded 65 × 65 grid and builds a shaded triangle mesh. The native wgpu surface renders behind a transparent control WebView; vertices, depth buffers and frames stay in Rust/GPU memory. Height is scaled to fit, with original z bounds displayed. Undefined samples and triangles adjacent to missing points are omitted; steep sampled jumps are also masked, which is a visualization heuristic rather than a proof of continuity. The display is a float64 approximation without an error guarantee. General implicit surfaces, parametric geometry and arbitrary variables beyond x/y are not supported. Camera and range are session view state; authored equations remain in the saved document.
+
 ## KOMYAKU integration
 
 The neighboring KOMYAKU project uses the same `symbio-core` from its math panel for local computation. Authored LaTeX remains in KOMYAKU's Canonical/Yjs history; SEG and calculation results are derived data.
@@ -76,7 +103,7 @@ KOMYAKU's **↗ .symbio** exports the current source and its explicit assumption
 cargo run --locked -p symbio-desktop -- --project /absolute/path/equation.symbio
 ```
 
-KOMYAKU's **↙ .symbio** reads the selected equation from the active branch of a saved Symbio document into a reviewable LaTeX draft. Rust validates the file and converts Expression syntax when necessary. Stored calculation results are not adopted. This integration exchanges individual equations; full document-history synchronization and `.komyaku` Archive import/export are outside its scope.
+KOMYAKU's **↙ .symbio** reads the selected equation from the active branch of a saved Symbio document into a reviewable LaTeX draft. Rust validates the file and converts Expression syntax when necessary. Referenced definitions are expanded into self-contained LaTeX for KOMYAKU; stored calculation results are not adopted. This integration exchanges individual equations; full document-history synchronization and `.komyaku` Archive import/export are outside its scope.
 
 ## Implementation boundaries
 
@@ -84,7 +111,7 @@ KOMYAKU's **↙ .symbio** reads the selected equation from the active branch of 
 - Integers, rationals and finite decimal input are exact. Arbitrary-precision floating point, complex numeric evaluation and certified interval arithmetic are unavailable.
 - `sqrt(x^2)` simplifies to `abs(x)` for real `x`, and to `x` for nonnegative or positive `x`. It remains unchanged for complex or unspecified domains. `x/x` is not cancelled without a nonzero assumption.
 - Rational-coefficient, single-variable polynomials up to degree 32 support expansion, differentiation and integration. Differentiation also covers selected elementary functions. General integration, factorization and higher-degree equation solving are unsupported.
-- Changing assumptions clears results in the current branch. Recompute explicitly using operation buttons. Cell names are display labels and do not yet resolve references between cells.
+- Cell references and recalculation are local to the active branch. References must name existing cells. Dependency expansion is bounded by the graph, source and nesting limits; long sessions may reach the append-only graph limit.
 - Results are `symbolic` or `approximate`. `conjecture` is a reserved data type. The release does not issue `verified` or `certified_numeric` results or claim formal proofs or certified numerical errors.
 - `.symbio` v1 is readable JSON. SQLite containers, content-addressed data, complete event replay and branch merging remain future work. The audit retains 256 events; Undo stacks are not persisted.
 - The structured API accepts an AI actor attribution, but AI connections, natural-language interpretation and an MCP server are not implemented. The app makes no external network requests.
@@ -100,7 +127,7 @@ python3 scripts/smoke-cli.py
 python3 scripts/smoke-math-keyboard.py
 node --check apps/desktop/ui/app.js
 node --check apps/desktop/ui/dock.js
-node --test scripts/math-keyboard.test.mjs scripts/latex-preview.test.mjs
+node --test scripts/math-keyboard.test.mjs scripts/latex-preview.test.mjs scripts/dependency-layout.test.mjs
 ```
 
 Serving `apps/desktop/ui` through a static server provides a **read-only** preview of sample data generated by Rust. The browser does not contain an alternative JavaScript calculation engine.

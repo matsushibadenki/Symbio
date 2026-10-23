@@ -11,6 +11,7 @@ tauri = { version = "=2.12.4", features = ["unstable"] }
 serde.workspace = true
 serde_json.workspace = true
 wgpu.workspace = true
+bytemuck = { workspace = true, features = ["derive"] }
 threex-core = { path = "../../vendor/threex/crates/core" }
 threex-renderer = { path = "../../vendor/threex/crates/renderer" }
 tempfile = "3.27"

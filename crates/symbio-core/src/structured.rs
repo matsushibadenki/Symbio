@@ -39,7 +39,9 @@ pub fn shape(g: &Graph, root: Id) -> Result<Shape> {
             }
         };
         let result = match n {
-            Node::Number(_) | Node::Symbol(_) | Node::Constant(_) => Shape::Scalar,
+            Node::Number(_) | Node::Symbol(_) | Node::Reference(_) | Node::Constant(_) => {
+                Shape::Scalar
+            }
             Node::Matrix {
                 rows,
                 cols,

@@ -18,6 +18,7 @@ pub const MAX_NODES: usize = 16000;
 pub enum Node {
     Number(String),
     Symbol(String),
+    Reference(String),
     Add(Id, Id),
     Sub(Id, Id),
     Mul(Id, Id),
@@ -138,7 +139,7 @@ impl Graph {
                         return Err(Error::Invalid("canonical number".into()));
                     }
                 }
-                Node::Symbol(s) => {
+                Node::Symbol(s) | Node::Reference(s) => {
                     if !valid_symbol(s) {
                         return Err(Error::Invalid("symbol".into()));
                     }
@@ -311,7 +312,7 @@ impl Graph {
             | Node::Matrix { .. }
             | Node::Equation(..)
             | Node::Solutions { .. } => self.structured_math(id, depth)?,
-            Node::Number(_) | Node::Symbol(_) | Node::Constant(_) => {
+            Node::Number(_) | Node::Symbol(_) | Node::Reference(_) | Node::Constant(_) => {
                 self.format(id, true, depth)?
             }
             Node::Add(a, b) => format!("<mrow>{}<mo>+</mo>{}</mrow>", f(*a, 1)?, f(*b, 1)?),
@@ -368,6 +369,13 @@ impl Graph {
         }
         let f = |i| self.format(i, math, depth + 1);
         let result = match &self.nodes[id] {
+            Node::Reference(s) => {
+                if math {
+                    format!("<mrow><mo>@</mo><mi mathvariant=\"normal\">{s}</mi></mrow>")
+                } else {
+                    format!("@{s}")
+                }
+            }
             Node::Constant(s) => {
                 if math {
                     format!(

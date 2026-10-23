@@ -58,3 +58,21 @@ No Windows/Linux execution, distribution signing/notarization, GPU device-loss t
 - [Native LaTeX calculation](screenshots/latex-seg-ja.png). UI text is translated in EN/JA/简体中文; the initial end-to-end interaction ran in English and the screenshot uses Japanese.
 
 Supported mathematical LaTeX is a documented subset, not a full TeX renderer or CAS importer. Preview checks syntax, not domain validity. Unimplemented integral/sum/matrix/equation notation remains an explicit error.
+
+## Native 3D panel addition · 2026-10-23
+
+- `cargo test -p symbio-core -p symbio-desktop`: **63 passed** (38 core, 25 desktop). Includes 3D sampling, undefined-point masks, explicit z equations, assumption domains, centered finite orbit cameras, v3 dock migration and three-to-four floating-host preference migration.
+- `cargo clippy -p symbio-desktop --all-targets -- -D warnings`: passed. Cargo still reports the pre-existing future-compatibility notice for `block 0.1.6`.
+- `node --test scripts/*.test.mjs`: **13 passed**; frontend module syntax check passed. `python3 scripts/build-dev-app.py` produced the current unsigned development app.
+- Native Tauri / Metal QA, Japanese UI at 1280×800: existing v3 workspace opens with 3D beside Notebook; add `sin(x) cos(y)` from the 3D panel; orbit by pointer drag; edit the LaTeX cell to `z=x^2-y^2` and observe automatic mesh / original height-bound updates.
+- Removing x's nonzero assumption restores the missing x=0 sample row (4160 → 4225 valid samples). Changing the common x/y range from [-5,5] to [-2,2] changes z bounds from [-25,25] to [-4,4]. Unsupported `t+x` clears the old mesh and displays a localized variable error; restoring the equation restores the mesh.
+- Float 3D into its native host and return it to the dock; verify correct region rendering in both hosts. Save and relaunch the current app: authored equation, existing calculations and dock placement restore, while camera/range initialize as documented session view state.
+- This is native application QA using accessibility state and screenshots; no browser console or other operating-system GPU backend was tested. EN/JA/简体中文 strings are provided; this addition's rendered interaction checks used Japanese. Windows/Linux, GPU loss recovery and complex / implicit / parametric surfaces remain untested or unsupported as described in README.
+
+## Startup host-capacity crash correction · 2026-10-23
+
+The reported 15:14 development build aborted during AppKit launch because floating-window preferences still held three slots while the new 3D panel restored slot four. The corrected build migrates previous preference files and derives storage capacity from `Panel::ALL.len()`. Restore/capture also use checked access. Regression tests cover every host slot, old settings with actual saved geometry, and a write/read roundtrip. `cargo test -p symbio-desktop` passed all 27 tests; Clippy passed and the app bundle was rebuilt. A native quit/relaunch restored the saved document and rendered the 3D panel successfully without clearing user settings.
+
+## Three-column default workspace
+
+The default and Reset workspace now use Objects / wide Notebook–3D tab group / Structure & history. Notebook is initially active. Older v1–v3 dock layouts add 3D as a Notebook tab; existing v4 custom layouts remain until reset. Native Japanese UI checks at 1280×800 confirmed the reset layout, central tab switching, native GPU rendering and cell-to-3D automatic tab activation. The desktop's 27 tests and Clippy passed; the development app was rebuilt and the requested default applied to the current workspace.

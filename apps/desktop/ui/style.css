@@ -38,3 +38,25 @@
 .keyboard-tabs{flex-wrap:wrap}.keyboard-tabs button{white-space:nowrap}
 @media(max-width:430px){.formula math,.output .formula math{font-size:26px}.formula{padding:12px 20px 12px 4px}.formula-zoom{opacity:1}.formula-stage{padding:24px 4px}}
 .operation-bar:is([data-kind="matrix"],[data-kind="equation"],[data-kind="integral"],[data-kind="aggregate"],[data-kind="derivative"]) :is([data-operation="differentiate"],[data-operation="integrate"],[data-operation="expand"],[data-operation="plot"]){display:none}
+
+.dependency-scroll{overflow:auto;max-height:300px;margin:10px 0 20px;border:1px solid var(--line,#d3dcdf);background:rgba(240,248,248,.45)}
+.dependency-stage{position:relative;margin-inline:auto}.dependency-edges{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}.dependency-edges path{fill:none;stroke:#a1b5b7;stroke-width:1.5}.dependency-edges path.active{stroke:#166573;stroke-width:2}
+.dependency-cell{position:absolute;width:114px;height:50px;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:4px;padding:8px 10px;border:1px solid #b6cacd;background:#fff;overflow:hidden;text-align:left}.dependency-cell strong{max-width:100%;overflow:hidden;text-overflow:ellipsis}.dependency-cell small{font-size:10px;color:#66787b;white-space:nowrap}.dependency-cell[aria-pressed=true]{border-color:#166573;background:#e1f0f1}.dependency-cell[data-error=true]{border-color:#b34a35}.dependency-dialog{width:min(1000px,92vw);max-height:90vh}.dependency-dialog .dependency-scroll{max-height:70vh}.dependency-dialog .dialog-head{margin-bottom:12px}
+.cell-dependencies{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:8px 0}.reference-chip{font-family:ui-monospace,monospace;color:#166573;min-height:26px;padding:3px 7px}.resolved-definition{margin:8px 0}.resolved-definition summary{font-size:11px;color:#52696d;cursor:pointer}.calculation-error{display:grid;gap:5px;border-left:2px solid #b34a35;background:#fff4ef;padding:12px;margin:8px 0;color:#8c3525;font-size:12px}.calculation-revision{padding-top:8px;color:#597d83}
+
+.input-form[data-draft=true] .calculation-error,.input-form[data-draft=true] .resolved-definition{display:none}
+
+.dependency-cell{width:calc(114px * var(--graph-scale,1));height:calc(50px * var(--graph-scale,1));font-size:calc(12px * var(--graph-scale,1));padding:calc(8px * var(--graph-scale,1)) calc(10px * var(--graph-scale,1))}.dependency-cell small{font-size:calc(10px * var(--graph-scale,1))}.dependency-window .panel-header{padding:12px 20px;gap:12px}.dependency-window-content{padding:24px}.dependency-window .dependency-scroll{max-height:none;height:100%;margin:0;border:0}.dependency-window input[type=range]{width:160px;padding:0}
+
+/* Native wgpu paints below this transparent WebView. Only chrome is opaque. */
+html:has(.surface-body),body.surface-body,.surface-body #app,.surface-panel{background:transparent}
+.surface-panel .panel-header{height:40px;min-height:40px}
+.surface-controls{height:76px;flex:none;padding:4px 8px;background:var(--color-panel);border-bottom:1px solid var(--color-line)}
+.surface-row{height:34px;display:flex;align-items:center;gap:4px;min-width:0;white-space:nowrap}
+.surface-row select{flex:1;width:60px}.surface-row input{width:calc((100% - 95px)/2);max-width:100px;padding:4px}.surface-row button{padding:4px;min-width:26px}.surface-row button[aria-pressed=true]{background:var(--color-selected);color:var(--color-accent)}
+.surface-formula{height:60px;flex:none;display:flex;align-items:center;justify-content:center;gap:8px;overflow:auto;padding:6px 12px;background:var(--color-paper);border-bottom:1px solid var(--color-line);font-size:21px}
+.surface-formula math{font-family:var(--font-math);font-size:22px;white-space:nowrap}.surface-math{flex:none}.surface-z{font-family:var(--font-math);white-space:nowrap}
+.surface-stage{flex:1;min-height:0;position:relative;touch-action:none;cursor:grab;outline-offset:-3px}.surface-stage:active{cursor:grabbing}.surface-overlay{position:absolute;inset:0;pointer-events:none;font-size:11px;color:var(--color-muted)}
+.surface-message{position:absolute;top:16px;left:16px;right:16px;background:var(--color-panel);padding:8px;border:1px solid var(--color-line)}
+.surface-heights{position:absolute;right:12px;top:12px;padding:3px 6px;background:var(--color-paper)}.surface-legend{position:absolute;left:12px;bottom:8px;padding:3px 6px;background:var(--color-paper)}
+.surface-status{height:24px;flex:none;display:flex;align-items:center;padding:0 8px;border-top:1px solid var(--color-line);background:var(--color-chrome);color:var(--color-muted);font-size:10px;white-space:nowrap;overflow:hidden}

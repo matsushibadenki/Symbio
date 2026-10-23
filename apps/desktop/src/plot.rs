@@ -71,7 +71,7 @@ pub async fn show_plot(webview: tauri::Webview, id: u64) -> Result<(), super::Ui
             .ok_or_else(|| super::error("invalid_project"))?;
         (
             p.graph.clone(),
-            c.root,
+            c.resolved_root.unwrap_or(c.root),
             c.name.clone(),
             p.current().assumptions.clone(),
         )

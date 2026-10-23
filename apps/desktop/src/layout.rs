@@ -8,14 +8,21 @@ pub enum Panel {
     Objects,
     Inspector,
     Notebook,
+    Surface,
 }
 impl Panel {
-    pub const ALL: [Self; 3] = [Self::Objects, Self::Inspector, Self::Notebook];
+    pub const ALL: [Self; 4] = [
+        Self::Objects,
+        Self::Inspector,
+        Self::Notebook,
+        Self::Surface,
+    ];
     pub fn label(self) -> &'static str {
         match self {
             Self::Objects => "objects",
             Self::Inspector => "inspector",
             Self::Notebook => "notebook",
+            Self::Surface => "surface",
         }
     }
     pub fn from_label(s: &str) -> Option<Self> {
@@ -26,6 +33,7 @@ impl Panel {
             Self::Objects => 0,
             Self::Inspector => 1,
             Self::Notebook => 2,
+            Self::Surface => 3,
         }
     }
     pub fn window(self) -> &'static str {
@@ -33,6 +41,7 @@ impl Panel {
             Self::Objects => "float-objects",
             Self::Inspector => "float-inspector",
             Self::Notebook => "float-notebook",
+            Self::Surface => "float-surface",
         }
     }
 }
@@ -281,25 +290,29 @@ pub struct LayoutState {
     pub floating: Vec<Panel>,
     #[serde(default)]
     pub floating_groups: Vec<FloatingGroup>,
-    pub home: [Destination; 3],
+    pub home: [Destination; 4],
     pub locale: String,
 }
 impl Default for LayoutState {
     fn default() -> Self {
         Self {
-            version: 3,
+            version: 4,
             revision: 0,
             next_id: 6,
             root: Some(Node::Split {
                 id: 1,
                 axis: Axis::Horizontal,
-                ratio: 0.22,
+                ratio: 0.20,
                 first: Box::new(leaf(2, Panel::Objects)),
                 second: Box::new(Node::Split {
                     id: 3,
                     axis: Axis::Horizontal,
-                    ratio: 0.70,
-                    first: Box::new(leaf(4, Panel::Notebook)),
+                    ratio: 0.75,
+                    first: Box::new(Node::Tabs {
+                        id: 4,
+                        panels: vec![Panel::Notebook, Panel::Surface],
+                        active: Panel::Notebook,
+                    }),
                     second: Box::new(leaf(5, Panel::Inspector)),
                 }),
             }),
@@ -315,8 +328,12 @@ impl Default for LayoutState {
                     zone: Zone::Right,
                 },
                 Destination {
-                    target: Some(Panel::Objects),
-                    zone: Zone::Right,
+                    target: Some(Panel::Surface),
+                    zone: Zone::Center,
+                },
+                Destination {
+                    target: Some(Panel::Notebook),
+                    zone: Zone::Center,
                 },
             ],
             locale: "ja".into(),
@@ -372,7 +389,7 @@ impl LayoutState {
                     *id > 0
                         && ids.insert(*id)
                         && !tabs.is_empty()
-                        && tabs.len() <= 3
+                        && tabs.len() <= 4
                         && tabs.contains(active)
                         && tabs.iter().all(|p| panels.insert(*p))
                 }
@@ -394,17 +411,17 @@ impl LayoutState {
         }
         let mut ids = BTreeSet::new();
         let mut panels = BTreeSet::new();
-        self.version == 3
+        self.version == 4
             && self.valid_floating_groups()
             && matches!(self.locale.as_str(), "ja" | "en" | "zh-CN")
-            && self.floating.len() <= 3
+            && self.floating.len() <= 4
             && self
                 .root
                 .as_ref()
                 .is_none_or(|n| visit(n, 0, &mut ids, &mut panels))
             && self.floating.iter().all(|p| panels.insert(*p))
-            && panels.len() == 3
-            && ids.len() <= 5
+            && panels.len() == 4
+            && ids.len() <= 7
             && self.next_id > ids.last().copied().unwrap_or(0)
             && self
                 .home
@@ -415,11 +432,11 @@ impl LayoutState {
     fn valid_floating_groups(&self) -> bool {
         let mut hosts = BTreeSet::new();
         let mut panels = BTreeSet::new();
-        self.floating_groups.len() <= 3
+        self.floating_groups.len() <= 4
             && self.floating_groups.iter().all(|g| {
                 hosts.insert(g.host)
                     && !g.panels.is_empty()
-                    && g.panels.len() <= 3
+                    && g.panels.len() <= 4
                     && g.panels.contains(&g.active)
                     && g.panels.iter().all(|p| panels.insert(*p))
             })
@@ -633,8 +650,20 @@ impl LayoutState {
         g
     }
     pub fn decode(bytes: &[u8]) -> Result<Self, String> {
-        let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
-        let mut s = match value.get("version").and_then(|v| v.as_u64()) {
+        let mut value: serde_json::Value =
+            serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+        let version = value.get("version").and_then(|v| v.as_u64());
+        if matches!(version, Some(2 | 3)) {
+            let home = value
+                .get_mut("home")
+                .and_then(|h| h.as_array_mut())
+                .ok_or("invalid layout")?;
+            if home.len() == 3 {
+                home.push(serde_json::json!({"target":"notebook","zone":"right"}));
+            }
+        }
+        let mut s = match version {
+            Some(4) => serde_json::from_value(value).map_err(|e| e.to_string())?,
             Some(3) => serde_json::from_value(value).map_err(|e| e.to_string())?,
             Some(2) => {
                 let mut old: Self = serde_json::from_value(value).map_err(|e| e.to_string())?;
@@ -653,6 +682,32 @@ impl LayoutState {
             Some(1) => migrate(value)?,
             _ => return Err("unsupported layout version".into()),
         };
+        if matches!(version, Some(2 | 3)) {
+            s.version = 4;
+            let present = s.docked(Panel::Surface) || s.floating.contains(&Panel::Surface);
+            if !present {
+                if s.docked(Panel::Notebook) {
+                    s.dock(
+                        Panel::Surface,
+                        Destination {
+                            target: Some(Panel::Notebook),
+                            zone: Zone::Center,
+                        },
+                    )
+                    .map_err(String::from)?;
+                    s.select(Panel::Notebook);
+                } else {
+                    s.dock(
+                        Panel::Surface,
+                        Destination {
+                            target: None,
+                            zone: Zone::Floating,
+                        },
+                    )
+                    .map_err(String::from)?;
+                }
+            }
+        }
         s.revision = 0;
         if !s.valid() {
             return Err("invalid layout".into());
@@ -902,6 +957,15 @@ fn migrate(value: serde_json::Value) -> Result<LayoutState, String> {
             },
         };
     }
+    s.dock(
+        Panel::Surface,
+        Destination {
+            target: Some(Panel::Notebook),
+            zone: Zone::Center,
+        },
+    )
+    .map_err(String::from)?;
+    s.select(Panel::Notebook);
     Ok(s)
 }
 #[cfg(test)]

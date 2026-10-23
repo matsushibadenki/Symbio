@@ -37,6 +37,9 @@ pub fn simplify(g: &mut Graph, root: Id, a: &Assumptions) -> Result<Id> {
             return Ok(*v);
         }
         let n = g.nodes[id].clone();
+        if matches!(n, Node::Reference(_)) {
+            return Err(Error::Invalid("unresolved cell reference".into()));
+        }
         if matches!(
             n,
             Node::Constant(_)
@@ -369,6 +372,7 @@ pub fn dimension(
         }
     };
     match &g.nodes[id] {
+        Node::Reference(_) => Ok(None),
         Node::Constant(_) | Node::Number(_) => Ok(Some([0; 3])),
         Node::Matrix { .. }
         | Node::Integral { .. }

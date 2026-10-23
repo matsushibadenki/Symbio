@@ -32,7 +32,8 @@ cargo run --locked -p symbio-cli -- inspect /tmp/study.symbio
 |---|---|---|
 | `math.define` | `id: null` or cell ID, `name`, `source` | Add or replace a cell; clear its result |
 | `math.define_latex` | `id: null` or cell ID, `name`, `source` | Parse bounded LaTeX into SEG, add or replace a cell; clear its result |
-| `math.assume` | `symbol`, `assumption` | Set domain/nonzero/dimension; clear current branch results |
+| `math.assume` | `symbol`, `assumption` | Set domain/nonzero/dimension and recalculate affected cells |
+| `math.recalculate` | optional `id` or null | Recalculate this cell and downstream consumers, or all cells |
 | `math.transform` | `id`, `operation`, `variable`, optional `bindings` | Explicit computation |
 | `math.select` | `id` | Set selected cell |
 | `math.remove` | `id` | Remove cell from current branch |
@@ -85,3 +86,17 @@ History stores the last 256 commands with actor, branch, revision and engine, wh
 `solve` accepts real single-variable rational-coefficient polynomials of degree at most two. It returns a `Solutions` node, including an empty set when there are no real roots. Infinite solution sets and complex solving are explicit unsupported cases. Matrix shapes are checked before commit; matrix size is limited to 8×8. Inverse and determinants above 2×2 require exact rational entries. Integral nodes retain the body, bound variable and paired optional limits. Finite aggregate nodes retain an integer range and sum/product flag (at most 256 terms). Unsupported antiderivatives fail without a partial mutation.
 
 Cell views also expose `kind`; inspect nodes include explicit `children` for graph traversal. The desktop-only pure `convert_source(source, from_format, to_format)` command converts through the SEG, refusing representations that would lose semantics. It does not mutate the document.
+
+## Definition references and dependency execution
+
+Expression syntax `@f` and LaTeX syntax `\cell{f}` construct a `reference` SEG node. Its target is the authored definition of cell `f` in the active branch. Resolution occurs before domain-sensitive algebra, preserving surrounding binder scope. Ordinary symbols never implicitly become references.
+
+Snapshots expose `dependencies` (`{from,to}` edges, provider to consumer), `calculation_order` and per-cell `dependencies`, `dependents`, `resolved_expression` and `resolved_mathml`. Cells persist an optional `calculation` recipe (`operation`, `variable`, `bindings`), `resolved_root`, `calculation_error` and `calculated_revision`.
+
+Definitions automatically attempt their saved recipe, defaulting to Compute for new cells. Source edits recalculate the edited cell and its transitive consumers. Assumption edits conservatively select cells using the changed symbol in their resolved definitions, then their consumers. Independent results are retained. Recalculation occurs within the triggering transaction/revision and does not add separate human/AI audit events. Undo/Redo restores definitions and derived results together.
+
+`math.recalculate` accepts an optional cell ID; null/omitted recalculates the entire active branch. Explicit transforms retain atomic failure behavior. Automatic mathematical failures commit the authored change but clear failed outputs and expose stable error codes. Structural missing-reference/cycle errors (`missing_reference`, `dependency_cycle`) and resource-limit failures reject the whole mutation. Referenced-cell deletion is rejected; renames update reference tokens without rewriting ordinary symbols.
+
+Contextual CLI `math.preview_latex` also accepts optional `id` to preview a replacement source, including its prospective cycle check. Desktop previews use the current branch in an isolated graph without mutating the document. The standalone LaTeX parser has no external cell context.
+
+KOMYAKU import expands reference definitions to bounded self-contained LaTeX before returning its source draft. It does not import saved outputs or trust claims. Unsupported or oversized expansions fail explicitly.

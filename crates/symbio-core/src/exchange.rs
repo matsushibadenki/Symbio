@@ -36,16 +36,23 @@ fn prepare(input: &MathInput) -> Result<AppCore> {
     project.current_mut().selected = None;
     project.current_mut().assumptions = input.assumptions.clone();
     project.next_cell = 1;
-    let mut core = AppCore::new(project)?;
-    core.apply(Request {
-        expected_revision: 0,
-        actor: Actor::Human,
-        command: Command::DefineLatex {
-            id: None,
-            name: "equation".into(),
-            source: input.source.clone(),
-        },
-    })?;
+    let root = SourceFormat::Latex.parse(&mut project.graph, &input.source)?;
+    project.current_mut().cells.push(Cell {
+        id: 1,
+        name: "equation".into(),
+        source: input.source.clone(),
+        source_format: SourceFormat::Latex,
+        root,
+        output: None,
+        calculation: None,
+        calculation_error: None,
+        calculated_revision: None,
+        resolved_root: None,
+        note: String::new(),
+    });
+    project.current_mut().selected = Some(1);
+    project.next_cell = 2;
+    let core = AppCore::new(project)?;
     Ok(core)
 }
 
@@ -98,11 +105,17 @@ pub fn import(json: &str) -> Result<ImportedMath> {
         .iter()
         .find(|c| Some(c.id) == branch.selected)
         .ok_or_else(|| Error::Invalid("select an equation in Symbio before exporting".into()))?;
-    let source = match cell.source_format {
-        SourceFormat::Latex => cell.source.clone(),
-        SourceFormat::Expression => {
-            latex::convert(&cell.source, SourceFormat::Expression, SourceFormat::Latex)?
+    let mut graph = project.graph.clone();
+    let source = if dependencies::references(&graph, cell.root).is_empty() {
+        match cell.source_format {
+            SourceFormat::Latex => cell.source.clone(),
+            SourceFormat::Expression => {
+                latex::convert(&cell.source, SourceFormat::Expression, SourceFormat::Latex)?
+            }
         }
+    } else {
+        let root = dependencies::resolve(&mut graph, branch, cell.root)?;
+        latex::source_from_graph(&graph, root)?
     };
     // Preview also enforces the editor-facing input/shape limits after conversion.
     latex::preview(&source)?;

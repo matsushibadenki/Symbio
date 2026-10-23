@@ -27,13 +27,13 @@ struct Placement {
 #[serde(deny_unknown_fields)]
 struct Preferences {
     version: u32,
-    windows: [Option<Placement>; 3],
+    windows: [Option<Placement>; super::layout::Panel::ALL.len()],
 }
 impl Default for Preferences {
     fn default() -> Self {
         Self {
             version: 1,
-            windows: [None, None, None],
+            windows: std::array::from_fn(|_| None),
         }
     }
 }
@@ -71,7 +71,14 @@ fn read(path: &Path) -> io::Result<Preferences> {
             "panel preferences too large",
         ));
     }
-    let prefs: Preferences = serde_json::from_slice(&bytes)?;
+    let mut value: serde_json::Value = serde_json::from_slice(&bytes)?;
+    if value.get("version").and_then(|v| v.as_u64()) == Some(1)
+        && let Some(windows) = value.get_mut("windows").and_then(|w| w.as_array_mut())
+        && windows.len() == 3
+    {
+        windows.push(serde_json::Value::Null);
+    }
+    let prefs: Preferences = serde_json::from_value(value)?;
     prefs.validate()?;
     Ok(prefs)
 }
@@ -211,7 +218,9 @@ impl Store {
                 .iter()
                 .position(|p| p.window() == window.label())
                 .unwrap();
-            prefs.windows[index] = Some(placement);
+            if let Some(slot) = prefs.windows.get_mut(index) {
+                *slot = Some(placement);
+            }
         }
     }
     pub fn restore(&self, window: &tauri::Window, minimum: [f64; 2]) -> tauri::Result<()> {
@@ -220,7 +229,7 @@ impl Store {
             super::layout::Panel::ALL
                 .iter()
                 .position(|p| p.window() == window.label())
-                .and_then(|i| prefs.windows[i].clone())
+                .and_then(|i| prefs.windows.get(i).cloned().flatten())
         };
         let Some(p) = placement else {
             return Ok(());
@@ -327,7 +336,7 @@ mod tests {
         let path = directory.join("panel-layout.json");
         assert_eq!(read(&path).unwrap(), Preferences::default());
         let prefs = Preferences {
-            windows: [None, Some(placement()), None],
+            windows: [None, Some(placement()), None, None],
             ..Preferences::default()
         };
         write(&path, &prefs).unwrap();
@@ -358,7 +367,7 @@ mod tests {
             p.size[0] = invalid;
             assert!(
                 Preferences {
-                    windows: [Some(p), None, None],
+                    windows: [Some(p), None, None, None],
                     ..Preferences::default()
                 }
                 .validate()
@@ -372,5 +381,50 @@ mod tests {
             scale: f64::NAN,
         };
         assert_eq!(fit(&placement(), &[screen], [0., 28.], [320., 400.]), None);
+    }
+}
+
+#[cfg(test)]
+mod migration_tests {
+    #[test]
+    fn previous_three_host_preferences_add_an_empty_surface_slot() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("windows.json");
+        std::fs::write(&path, br#"{"version":1,"windows":[null,null,null]}"#).unwrap();
+        let prefs = super::read(&path).unwrap();
+        assert_eq!(prefs.windows.len(), 4);
+        assert!(prefs.windows.iter().all(Option::is_none));
+    }
+}
+
+#[cfg(test)]
+mod panel_capacity_tests {
+    #[test]
+    fn every_native_panel_has_a_preference_slot() {
+        let prefs = super::Preferences::default();
+        for panel in crate::layout::Panel::ALL {
+            assert!(
+                prefs.windows.get(panel.index()).is_some(),
+                "missing host slot: {}",
+                panel.window()
+            );
+        }
+    }
+    #[test]
+    fn legacy_geometry_survives_surface_slot_migration() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("windows.json");
+        let geometry = serde_json::json!({"monitor":"Test display","origin":[0,0],"offset":[20.0,30.0],"size":[400.0,560.0]});
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&serde_json::json!({"version":1,"windows":[geometry,null,null]}))
+                .unwrap(),
+        )
+        .unwrap();
+        let prefs = super::read(&path).unwrap();
+        assert_eq!(prefs.windows[0].as_ref().unwrap().size, [400., 560.]);
+        assert!(prefs.windows[crate::layout::Panel::Surface.index()].is_none());
+        super::write(&path, &prefs).unwrap();
+        assert_eq!(super::read(&path).unwrap(), prefs);
     }
 }

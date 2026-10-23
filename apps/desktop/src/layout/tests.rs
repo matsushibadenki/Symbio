@@ -66,8 +66,13 @@ fn floating_all_panels_and_return_fallback_preserve_identity() {
         dock(&mut s, p, None, Zone::Floating);
     }
     assert!(s.root.is_none());
-    assert_eq!(s.floating.len(), 3);
-    for p in [Panel::Notebook, Panel::Inspector, Panel::Objects] {
+    assert_eq!(s.floating.len(), 4);
+    for p in [
+        Panel::Surface,
+        Panel::Notebook,
+        Panel::Inspector,
+        Panel::Objects,
+    ] {
         apply(&mut s, Command::Return { panel: p });
     }
     assert!(s.floating.is_empty());
@@ -328,7 +333,7 @@ fn floating_group_keeps_order_selection_and_returns_to_original_side() {
 #[test]
 fn whole_workspace_float_can_detach_host_member_and_return_without_collision() {
     let mut s = LayoutState::default();
-    for panel in [Panel::Inspector, Panel::Notebook] {
+    for panel in [Panel::Inspector, Panel::Notebook, Panel::Surface] {
         s = s
             .apply(
                 Command::Dock {
@@ -400,7 +405,7 @@ fn v2_single_floats_migrate_and_v3_rejects_ambiguous_groups() {
     old["version"] = 2.into();
     old.as_object_mut().unwrap().remove("floating_groups");
     let migrated = LayoutState::decode(&serde_json::to_vec(&old).unwrap()).unwrap();
-    assert_eq!(migrated.version, 3);
+    assert_eq!(migrated.version, 4);
     assert_eq!(migrated.host(Panel::Notebook), "float-notebook");
     for broken in [
         serde_json::json!([]),
@@ -411,4 +416,27 @@ fn v2_single_floats_migrate_and_v3_rejects_ambiguous_groups() {
         value["floating_groups"] = broken;
         assert!(LayoutState::decode(&serde_json::to_vec(&value).unwrap()).is_err());
     }
+}
+
+#[test]
+fn v3_layout_adds_surface_tab_without_losing_existing_panels() {
+    let mut value = serde_json::to_value(LayoutState::default()).unwrap();
+    value["version"] = 3.into();
+    value["next_id"] = 6.into();
+    value["home"].as_array_mut().unwrap().pop();
+    // Reconstruct the previous three-panel tree, including a custom split ratio.
+    value["root"]["second"]["first"] =
+        serde_json::json!({"kind":"tabs","id":4,"panels":["notebook"],"active":"notebook"});
+    value["root"]["ratio"] = 0.25.into();
+    let migrated = LayoutState::decode(&serde_json::to_vec(&value).unwrap()).unwrap();
+    assert!(migrated.valid());
+    let groups = migrated.geometry([1280, 800], 1., 0).groups;
+    let center = groups
+        .iter()
+        .find(|g| g.panels.contains(&Panel::Notebook))
+        .unwrap();
+    assert_eq!(center.panels, vec![Panel::Notebook, Panel::Surface]);
+    assert_eq!(center.active, Panel::Notebook);
+    assert_eq!(groups.len(), 3);
+    assert!(matches!(migrated.root,Some(Node::Split{ratio,..}) if ratio==0.25));
 }

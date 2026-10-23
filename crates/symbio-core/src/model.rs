@@ -57,6 +57,23 @@ impl SourceFormat {
         }
     }
 }
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Calculation {
+    pub operation: String,
+    pub variable: String,
+    #[serde(default)]
+    pub bindings: BTreeMap<String, f64>,
+}
+impl Default for Calculation {
+    fn default() -> Self {
+        Self {
+            operation: "compute".into(),
+            variable: "x".into(),
+            bindings: BTreeMap::new(),
+        }
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Cell {
@@ -67,6 +84,14 @@ pub struct Cell {
     pub source_format: SourceFormat,
     pub root: Id,
     pub output: Option<Output>,
+    #[serde(default)]
+    pub calculation: Option<Calculation>,
+    #[serde(default)]
+    pub calculation_error: Option<String>,
+    #[serde(default)]
+    pub calculated_revision: Option<u64>,
+    #[serde(default)]
+    pub resolved_root: Option<Id>,
     pub note: String,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -139,6 +164,13 @@ impl Project {
                 source: "x^3 + 2*x^2 - 5*x".into(),
                 root,
                 output: output(derivative, "differentiate"),
+                calculation: Some(Calculation {
+                    operation: "differentiate".into(),
+                    ..Default::default()
+                }),
+                calculation_error: None,
+                calculated_revision: None,
+                resolved_root: None,
                 note: String::new(),
             },
             Cell {
@@ -148,6 +180,13 @@ impl Project {
                 source: "sqrt(x^2)".into(),
                 root: second,
                 output: output(simplified, "simplify"),
+                calculation: Some(Calculation {
+                    operation: "simplify".into(),
+                    ..Default::default()
+                }),
+                calculation_error: None,
+                calculated_revision: None,
+                resolved_root: None,
                 note: String::new(),
             },
         ];
@@ -205,9 +244,12 @@ impl Project {
                 return Err(Error::Limit);
             }
             let mut seen = BTreeSet::new();
+            let mut names = BTreeSet::new();
+            crate::dependencies::DependencyGraph::build(&graph, b)?;
             for c in &b.cells {
                 if c.id >= self.next_cell
                     || !seen.insert(c.id)
+                    || !names.insert(c.name.clone())
                     || !valid_symbol(&c.name)
                     || c.source.len() > 2048
                     || c.note.len() > 4096
@@ -215,11 +257,36 @@ impl Project {
                 {
                     return Err(Error::Invalid("cell".into()));
                 }
-                crate::structured::shape(&graph, c.root)?;
+                if crate::dependencies::references(&graph, c.root).is_empty() {
+                    crate::structured::shape(&graph, c.root)?;
+                }
                 if c.source_format.parse(&mut graph, &c.source)? != c.root {
                     return Err(Error::Invalid("source/root mismatch".into()));
                 }
-                algebra::dimension(&graph, c.root, &b.assumptions, 0)?;
+                if c.calculation_error.is_none()
+                    && crate::dependencies::references(&graph, c.root).is_empty()
+                {
+                    algebra::dimension(&graph, c.root, &b.assumptions, 0)?;
+                }
+                if c.calculation_error.is_some() && c.output.is_some() {
+                    return Err(Error::Invalid("failed calculation has output".into()));
+                }
+                if let Some(plan) = &c.calculation {
+                    crate::dependencies::validate_plan(plan)?;
+                }
+                if let Some(root) = c.resolved_root {
+                    if root >= self.graph.nodes.len() {
+                        return Err(Error::Invalid("resolved root".into()));
+                    }
+                    let expected = crate::dependencies::resolve(&mut graph, b, c.root)?;
+                    if root != expected {
+                        return Err(Error::Invalid("resolved source mismatch".into()));
+                    }
+                    if c.calculation_error.is_none() {
+                        crate::structured::shape(&graph, root)?;
+                        algebra::dimension(&graph, root, &b.assumptions, 0)?;
+                    }
+                }
                 if let Some(o) = &c.output
                     && (o.root.is_some_and(|r| r >= self.graph.nodes.len())
                         || o.value.is_some_and(|v| !v.is_finite())

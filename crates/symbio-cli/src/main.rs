@@ -57,7 +57,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .get("source")
                         .and_then(|s| s.as_str())
                         .ok_or("source must be a string")?;
-                    Ok(serde_json::to_value(symbio_core::latex::preview(source)?)?)
+                    Ok(serde_json::to_value(core.preview_latex(
+                        source,
+                        v.get("id").and_then(|id| id.as_u64()),
+                    )?)?)
                 }
                 Some("math.export") => Ok(serde_json::to_value(core.project())?),
                 Some("math.save") => {

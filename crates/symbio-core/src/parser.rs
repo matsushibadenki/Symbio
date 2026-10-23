@@ -7,6 +7,7 @@ use num_bigint::BigInt;
 enum Token {
     Number(String),
     Name(String),
+    Reference(String),
     Op(char),
     End,
 }
@@ -36,6 +37,17 @@ pub fn parse(graph: &mut Graph, source: &str) -> Result<Id> {
                 return Err(Error::Parse(start));
             }
             tokens.push(Token::Number(chars[start..i].iter().collect()));
+        } else if c == '@' {
+            i += 1;
+            let start = i;
+            while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                i += 1;
+            }
+            let name: String = chars[start..i].iter().collect();
+            if !crate::graph::valid_symbol(&name) {
+                return Err(Error::Parse(start));
+            }
+            tokens.push(Token::Reference(name));
         } else if c.is_ascii_alphabetic() || c == '_' {
             let start = i;
             while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
@@ -86,6 +98,7 @@ impl Parser<'_> {
                 self.graph
                     .rat(Rational::new(n, BigInt::from(10u8).pow(frac.len() as u32)))?
             }
+            Token::Reference(s) => self.graph.intern(Node::Reference(s))?,
             Token::Name(s) => {
                 if !crate::graph::valid_symbol(&s) {
                     return Err(Error::Parse(self.pos));

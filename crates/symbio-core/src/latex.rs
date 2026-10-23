@@ -11,6 +11,7 @@ use serde::Serialize;
 enum Token {
     Number(String),
     Symbol(String),
+    Reference(String),
     Command(String),
     Op(char),
     Row,
@@ -27,7 +28,9 @@ pub struct Preview {
 pub fn preview(source: &str) -> Result<Preview> {
     let mut graph = Graph::default();
     let root = parse(&mut graph, source)?;
-    crate::structured::shape(&graph, root)?;
+    if crate::dependencies::references(&graph, root).is_empty() {
+        crate::structured::shape(&graph, root)?;
+    }
     Ok(Preview {
         kind: crate::structured::kind(&graph, root).into(),
         expression: graph.text(root),
@@ -86,6 +89,22 @@ pub fn parse(graph: &mut Graph, source: &str) -> Result<Id> {
                 let name: String = chars[start..i].iter().collect();
                 match name.as_str() {
                     "quad" | "qquad" | "displaystyle" => continue,
+                    "cell" => {
+                        if chars.get(i) != Some(&'{') {
+                            return Err(Error::Parse(i));
+                        }
+                        i += 1;
+                        let start = i;
+                        while i < chars.len() && chars[i] != '}' {
+                            i += 1;
+                        }
+                        let name: String = chars[start..i].iter().collect();
+                        if chars.get(i) != Some(&'}') || !crate::graph::valid_symbol(&name) {
+                            return Err(Error::Parse(i));
+                        }
+                        i += 1;
+                        Token::Reference(name)
+                    }
                     "mathit" => {
                         if chars.get(i) != Some(&'{') {
                             return Err(Error::Parse(i));
@@ -211,6 +230,7 @@ impl Parser<'_> {
         }
         match self.take() {
             Token::Number(s) => parser::parse(self.graph, &s),
+            Token::Reference(s) => self.graph.intern(Node::Reference(s)),
             Token::Symbol(mut s) => {
                 if self.peek() == &Token::Op('_') {
                     self.take();
@@ -481,9 +501,10 @@ impl Parser<'_> {
                 Token::Op('*') => ('*', 3, 4, false),
                 Token::Op('/') => ('/', 3, 4, false),
                 Token::Op('^') => ('^', 7, 6, false),
-                Token::Number(_) | Token::Symbol(_) | Token::Op('(' | '{' | '[') => {
-                    ('*', 3, 4, true)
-                }
+                Token::Number(_)
+                | Token::Symbol(_)
+                | Token::Reference(_)
+                | Token::Op('(' | '{' | '[') => ('*', 3, 4, true),
                 Token::Command(s)
                     if !["right", "rvert", "end", "rfloor", "rceil"].contains(&s.as_str()) =>
                 {
@@ -530,61 +551,122 @@ impl Parser<'_> {
 pub fn convert(source: &str, from: crate::SourceFormat, to: crate::SourceFormat) -> Result<String> {
     let mut g = Graph::default();
     let root = from.parse(&mut g, source)?;
-    crate::structured::shape(&g, root)?;
+    if crate::dependencies::references(&g, root).is_empty() {
+        crate::structured::shape(&g, root)?;
+    }
     if from == to {
         return Ok(source.into());
-    }
-    fn tex(g: &Graph, id: Id, depth: usize) -> Result<String> {
-        if depth > 64 {
-            return Err(Error::Limit);
-        }
-        let f = |id| tex(g, id, depth + 1);
-        let out = match &g.nodes[id] {
-            Node::Number(n) => {
-                if let Some((a, b)) = n.split_once('/') {
-                    format!(r"\frac{{{a}}}{{{b}}}")
-                } else {
-                    n.clone()
-                }
-            }
-            Node::Symbol(s) => {
-                if s.len() == 1 {
-                    s.clone()
-                } else {
-                    format!(r"\mathit{{{s}}}")
-                }
-            }
-            Node::Add(a, b) => format!(r"\left({}+{}\right)", f(*a)?, f(*b)?),
-            Node::Sub(a, b) => format!(r"\left({}-{}\right)", f(*a)?, f(*b)?),
-            Node::Mul(a, b) => format!(r"\left({}\cdot {}\right)", f(*a)?, f(*b)?),
-            Node::Div(a, b) => format!(r"\frac{{{}}}{{{}}}", f(*a)?, f(*b)?),
-            Node::Pow(a, b) => format!(r"\left({}\right)^{{{}}}", f(*a)?, f(*b)?),
-            Node::Call(name, a) => match name.as_str() {
-                "sqrt" => format!(r"\sqrt{{{}}}", f(*a)?),
-                "abs" => format!(r"\left|{}\right|", f(*a)?),
-                _ => format!(
-                    r"\{}\left({}\right)",
-                    if name == "log" { "ln" } else { name },
-                    f(*a)?
-                ),
-            },
-            _ => {
-                return Err(Error::Unsupported(
-                    "use LaTeX for this structured expression".into(),
-                ));
-            }
-        };
-        if out.len() > 2048 {
-            return Err(Error::Limit);
-        }
-        Ok(out)
     }
     if to == crate::SourceFormat::Latex {
         return tex(&g, root, 0);
     }
     // The ordinary parser has no matrix, binder, equation or numeric-constant syntax.
-    if g.nodes.iter().any(|n|!matches!(n,Node::Number(_)|Node::Symbol(_)|Node::Add(..)|Node::Sub(..)|Node::Mul(..)|Node::Div(..)|Node::Pow(..)|Node::Call(..))) || g.nodes.iter().any(|n|matches!(n,Node::Call(f,_) if !["sin","cos","exp","log","abs","sqrt"].contains(&f.as_str()))) {return Err(Error::Unsupported("this expression requires LaTeX mode".into()));}
+    if g.nodes.iter().any(|n|!matches!(n,Node::Number(_)|Node::Symbol(_)|Node::Reference(_)|Node::Add(..)|Node::Sub(..)|Node::Mul(..)|Node::Div(..)|Node::Pow(..)|Node::Call(..))) || g.nodes.iter().any(|n|matches!(n,Node::Call(f,_) if !["sin","cos","exp","log","abs","sqrt"].contains(&f.as_str()))) {return Err(Error::Unsupported("this expression requires LaTeX mode".into()));}
     let out = g.text(root);
+    if out.len() > 2048 {
+        return Err(Error::Limit);
+    }
+    Ok(out)
+}
+
+/// Serialize a resolved definition for source exchange with external editors.
+pub fn source_from_graph(g: &Graph, root: Id) -> Result<String> {
+    tex(g, root, 0)
+}
+fn tex(g: &Graph, id: Id, depth: usize) -> Result<String> {
+    if depth > 64 {
+        return Err(Error::Limit);
+    }
+    let f = |id| tex(g, id, depth + 1);
+    let out = match &g.nodes[id] {
+        Node::Number(n) => {
+            if let Some((a, b)) = n.split_once('/') {
+                format!(r"\frac{{{a}}}{{{b}}}")
+            } else {
+                n.clone()
+            }
+        }
+        Node::Constant(s) => {
+            if s == "pi" {
+                "\\pi".into()
+            } else {
+                "\\exp(1)".into()
+            }
+        }
+        Node::Matrix { cols, entries, .. } => {
+            let rows = entries
+                .chunks(*cols)
+                .map(|row| {
+                    row.iter()
+                        .map(|id| f(*id))
+                        .collect::<Result<Vec<_>>>()
+                        .map(|row| row.join(" & "))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            format!("\\begin{{bmatrix}}{}\\end{{bmatrix}}", rows.join(" \\ "))
+        }
+        Node::Equation(a, b) => format!("{}={}", f(*a)?, f(*b)?),
+        Node::Integral {
+            body,
+            variable,
+            lower,
+            upper,
+        } => {
+            let limits = match (lower, upper) {
+                (Some(l), Some(u)) => format!("_{{{}}}^{{{}}}", f(*l)?, f(*u)?),
+                _ => String::new(),
+            };
+            format!("\\int{limits}{{{}}}\\,d\\mathit{{{variable}}}", f(*body)?)
+        }
+        Node::Derivative { body, variable } => format!(
+            "\\frac{{d}}{{d\\mathit{{{variable}}}}}\\left({}\\right)",
+            f(*body)?
+        ),
+        Node::Aggregate {
+            body,
+            variable,
+            lower,
+            upper,
+            product,
+        } => format!(
+            "\\{}_{{\\mathit{{{variable}}}={}}}^{{{}}}{{{}}}",
+            if *product { "prod" } else { "sum" },
+            f(*lower)?,
+            f(*upper)?,
+            f(*body)?
+        ),
+        Node::Reference(s) => format!("\\cell{{{s}}}"),
+        Node::Symbol(s) => {
+            if s.len() == 1 {
+                s.clone()
+            } else {
+                format!(r"\mathit{{{s}}}")
+            }
+        }
+        Node::Add(a, b) => format!(r"\left({}+{}\right)", f(*a)?, f(*b)?),
+        Node::Sub(a, b) => format!(r"\left({}-{}\right)", f(*a)?, f(*b)?),
+        Node::Mul(a, b) => format!(r"\left({}\cdot {}\right)", f(*a)?, f(*b)?),
+        Node::Div(a, b) => format!(r"\frac{{{}}}{{{}}}", f(*a)?, f(*b)?),
+        Node::Pow(a, b) => format!(r"\left({}\right)^{{{}}}", f(*a)?, f(*b)?),
+        Node::Call(name, a) => match name.as_str() {
+            "sqrt" => format!(r"\sqrt{{{}}}", f(*a)?),
+            "abs" => format!(r"\left|{}\right|", f(*a)?),
+            "transpose" => format!(r"\left({}\right)^{{T}}", f(*a)?),
+            "inverse" => format!(r"\left({}\right)^{{-1}}", f(*a)?),
+            "floor" => format!(r"\lfloor {}\rfloor", f(*a)?),
+            "ceil" => format!(r"\lceil {}\rceil", f(*a)?),
+            _ => format!(
+                r"\{}\left({}\right)",
+                if name == "log" { "ln" } else { name },
+                f(*a)?
+            ),
+        },
+        _ => {
+            return Err(Error::Unsupported(
+                "use LaTeX for this structured expression".into(),
+            ));
+        }
+    };
     if out.len() > 2048 {
         return Err(Error::Limit);
     }

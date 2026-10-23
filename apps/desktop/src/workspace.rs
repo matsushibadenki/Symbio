@@ -249,7 +249,7 @@ fn apply_bounds(app: &tauri::AppHandle) -> Result<(), UiError> {
             view.hide().map_err(native)?;
         }
     }
-    for i in 0..2 {
+    for i in 0..3 {
         if let Some(view) = app.get_webview(&format!("split-{i}")) {
             if let Some(split) = geometry.splits.get(i) {
                 bounds(&view, split.rect)?;
@@ -270,7 +270,10 @@ fn apply_bounds(app: &tauri::AppHandle) -> Result<(), UiError> {
 }
 fn redraw(app: &tauri::AppHandle) {
     let target = app.clone();
-    let _ = app.run_on_main_thread(move || super::plot::draw(&target));
+    let _ = app.run_on_main_thread(move || {
+        super::plot::draw(&target);
+        super::surface3d::draw(&target);
+    });
 }
 fn notify(app: &tauri::AppHandle) {
     let _ = app.emit("symbio://dock-preview", Option::<Destination>::None);
@@ -320,6 +323,7 @@ pub fn initialize(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Erro
     }
     // Prepare every possible host surface before child WebViews; reuse one renderer.
     let _ = floating;
+    super::surface3d::initialize(app)?;
     app.state::<Workspace>().update_inset(&home);
     let state = app.state::<Workspace>().snapshot();
     add_view(&home, "toolbar")?;
@@ -333,7 +337,7 @@ pub fn initialize(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Erro
             parent.show()?;
         }
     }
-    for i in 0..2 {
+    for i in 0..3 {
         add_view(&home, &format!("split-{i}"))?;
     }
     apply_bounds(app).map_err(|e| std::io::Error::other(e.code))?;
@@ -355,6 +359,7 @@ fn add_view(window: &tauri::Window, label: &str) -> tauri::Result<()> {
             label,
             tauri::WebviewUrl::App(format!("index.html?view={label}").into()),
         )
+        .transparent(label == "surface")
         .on_page_load(|view, payload| {
             if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
                 view.state::<Workspace>()
@@ -372,6 +377,9 @@ fn add_view(window: &tauri::Window, label: &str) -> tauri::Result<()> {
 }
 fn panel_title(panel: Panel, locale: &str) -> &'static str {
     match (panel, locale) {
+        (Panel::Surface, "ja") => "Symbio · 3D",
+        (Panel::Surface, "zh-CN") => "Symbio · 3D",
+        (Panel::Surface, _) => "Symbio · 3D",
         (Panel::Objects, "ja") => "Symbio · オブジェクト",
         (Panel::Inspector, "ja") => "Symbio · 構造・履歴",
         (Panel::Notebook, "ja") => "Symbio · ノート",
@@ -494,7 +502,7 @@ pub fn execute(
     Ok(next)
 }
 fn layout_authorize(view: &tauri::Webview) -> Result<(), UiError> {
-    if matches!(view.label(), "split-0" | "split-1") {
+    if matches!(view.label(), "split-0" | "split-1" | "split-2") {
         Ok(())
     } else {
         super::authorize(view)

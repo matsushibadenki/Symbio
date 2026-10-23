@@ -36,7 +36,7 @@ The kernel conservatively declines unsupported transforms. Symbolic output is no
 
 ## Persistence and concurrency
 
-Every mutation supplies the current revision. Validation precedes commit; conflicts and domain errors leave the document unchanged. Assumption changes invalidate current-branch outputs. Branches share immutable graph nodes but own distinct cells and assumptions. No merge semantics or named-cell dependency resolution is implied.
+Every mutation supplies the current revision. Validation precedes commit; conflicts and domain errors leave the document unchanged. Assumption changes recalculate affected current-branch cells using persisted calculation recipes. Branches share immutable graph nodes but own distinct cells and assumptions. Reference nodes resolve authored definitions within the active branch; branch merging remains unsupported.
 
 An advisory file lock excludes cooperating writers. Saving compares file bytes with the loaded baseline, then writes/syncs a same-directory temporary file, atomically renames it and syncs the directory on Unix. Files larger than 8 MiB are rejected. Invalid/version-mismatched documents are not silently replaced. This detects external changes but is not a distributed filesystem transaction.
 
@@ -57,3 +57,19 @@ Rust generates MathML with native fraction, integral limit, derivative, matrix-t
 ## KOMYAKU source bridge
 
 `exchange.rs` exposes bounded, GUI-independent computation and single-equation `.symbio` export/import. The KOMYAKU desktop uses this crate as a sibling path dependency. Each request builds an isolated temporary Project with the caller's explicit assumptions, avoiding sample cells/default assumptions or other document content. Computed outputs remain derived data in KOMYAKU. Its Canonical source edits retain stable IDs and the existing Yjs/checkpoint pipeline. The adapter does not perform filesystem or network I/O.
+
+## Dependency runtime
+
+`dependencies.rs` validates a branch-local cell DAG, resolves explicit `reference` nodes and expands authored definitions before algebra. It computes a deterministic topological order, affected downstream closure and conservative assumption users. The transaction layer replays each affected cell's persisted calculation recipe. Mathematical failures clear stale outputs and retain editable source/error state; graph structure and resource failures roll back atomically.
+
+Cached resolved roots are checked against authored definitions during file validation. Loading initializes missing legacy caches and recovers audited calculation parameters when available. Derived recipes/results are branch-local and part of Undo snapshots. The WebView draws at most 128 cell nodes from Rust-owned edges; it does not resolve references or evaluate formulas. Diagram geometry uses CSSOM properties compatible with the existing strict CSP, and skipped-level edges route around intermediate nodes.
+
+The inspector opens the dependency diagram in a dedicated native window with adjustable zoom. All graph windows subscribe to the same Rust document; node selection and recalculation use the common command API.
+
+## Native 3D surface panel
+
+`surface3d.rs` owns cell selection, the square x/y domain, orbit camera and bounded CPU sampling over resolved SEG definitions. Edit publication schedules a new generation; stale sampler jobs cannot replace newer selections or ranges. Unsupported / undefined inputs clear the retained mesh and publish an explicit view error. These are session view settings, separate from the mathematical document and its Undo stack.
+
+`surface_gpu.rs` owns a shared device, triangle / line buffers and native presentation targets for every possible dock host. Host surfaces are created on AppKit's thread before child WebViews. Each render uses Rust dock geometry for viewport / scissor and shares mesh buffers when the panel floats or returns. A transparent WebView carries opaque controls, MathML and pointer / keyboard commands above the native surface. No texture readback, frame transport or JavaScript geometry generation occurs. ThreeX supplies camera projection mathematics; native region and retained buffer patterns follow the existing ThreeX/ATOM implementation.
+
+Dock layout version 4 migrates v1–v3 layouts to include the new surface panel, preserving existing panel identities and placement. The new panel joins a docked Notebook as a tab, or floats when Notebook is already floating. New and reset layouts use three columns with a wide central Notebook / 3D tab group. Existing v4 custom layouts remain saved until Reset workspace is requested. Floating-window preferences migrate three host slots to four.

@@ -3349,6 +3349,7 @@ dependencies = [
 name = "symbio-desktop"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "objc2-app-kit",
  "serde",
  "serde_json",

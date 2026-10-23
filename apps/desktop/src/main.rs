@@ -1,5 +1,7 @@
 mod layout;
 mod plot;
+mod surface3d;
+mod surface_gpu;
 mod window_placement;
 mod workspace;
 use serde::Serialize;
@@ -47,7 +49,7 @@ impl From<symbio_core::Error> for UiError {
 fn authorize(view: &tauri::Webview) -> Result<(), UiError> {
     if matches!(
         view.label(),
-        "toolbar" | "objects" | "notebook" | "inspector"
+        "toolbar" | "objects" | "notebook" | "inspector" | "dependencies" | "surface"
     ) {
         Ok(())
     } else {
@@ -65,13 +67,48 @@ fn snapshot(webview: tauri::Webview, state: tauri::State<Shared>) -> Result<Snap
         .snapshot())
 }
 #[tauri::command]
+fn show_dependencies(webview: tauri::Webview) -> Result<(), UiError> {
+    authorize(&webview)?;
+    let app = webview.app_handle();
+    if let Some(window) = app.get_webview_window("dependencies") {
+        window.show().map_err(|_| error("panel_error"))?;
+        window.set_focus().map_err(|_| error("panel_error"))?;
+    } else {
+        let locale = app.state::<workspace::Workspace>().snapshot().locale;
+        let title = match locale.as_str() {
+            "ja" => "Symbio · セルの依存関係",
+            "zh-CN" => "Symbio · 单元依赖关系",
+            _ => "Symbio · Cell dependencies",
+        };
+        tauri::WebviewWindowBuilder::new(
+            app,
+            "dependencies",
+            tauri::WebviewUrl::App("index.html?view=dependencies".into()),
+        )
+        .title(title)
+        .inner_size(960., 700.)
+        .min_inner_size(480., 400.)
+        .center()
+        .build()
+        .map_err(|_| error("panel_error"))?;
+    }
+    Ok(())
+}
+#[tauri::command]
 async fn preview_latex(
     webview: tauri::Webview,
     source: String,
+    id: Option<u64>,
 ) -> Result<symbio_core::latex::Preview, UiError> {
     authorize(&webview)?;
+    let app = webview.app_handle().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        symbio_core::latex::preview(&source).map_err(UiError::from)
+        let state = app.state::<Shared>();
+        let session = state.0.lock().map_err(|_| error("internal_error"))?;
+        session
+            .core
+            .preview_latex(&source, id)
+            .map_err(UiError::from)
     })
     .await
     .map_err(|_| error("internal_error"))?
@@ -99,7 +136,8 @@ async fn edit(webview: tauri::Webview, request: Request) -> Result<Snapshot, UiE
         let mut session = state.0.lock().map_err(|_| error("internal_error"))?;
         if matches!(
             request.command,
-            symbio_core::Command::Checkout { .. }
+            symbio_core::Command::Recalculate { .. }
+                | symbio_core::Command::Checkout { .. }
                 | symbio_core::Command::Branch { .. }
                 | symbio_core::Command::Undo
                 | symbio_core::Command::Redo
@@ -115,6 +153,8 @@ async fn edit(webview: tauri::Webview, request: Request) -> Result<Snapshot, UiE
         }
         let snapshot = session.core.apply(request)?;
         let _ = app.emit("symbio://changed", &snapshot);
+        drop(session);
+        surface3d::refresh(&app);
         Ok(snapshot)
     })
     .await
@@ -192,6 +232,7 @@ fn export_document(
 fn main() {
     let result = tauri::Builder::default()
         .manage(plot::Plot::default())
+        .manage(surface3d::Surface3d::default())
         .manage(Drafts::default())
         .setup(|app| {
             let args: Vec<_> = std::env::args().skip(1).collect();
@@ -229,6 +270,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             preview_latex,
+            show_dependencies,
             convert_source,
             set_draft,
             snapshot,
@@ -237,12 +279,17 @@ fn main() {
             inspect,
             export_document,
             plot::show_plot,
+            surface3d::surface_state,
+            surface3d::surface_command,
             workspace::workspace_state,
             workspace::workspace_command,
             workspace::split_resize,
             workspace::panel_drag
         ])
         .on_window_event(|window, event| {
+            if window.label() == "dependencies" {
+                return;
+            }
             if window.label() == "plot" {
                 plot::event(window, event);
                 return;

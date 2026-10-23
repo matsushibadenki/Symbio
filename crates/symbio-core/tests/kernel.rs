@@ -119,7 +119,16 @@ fn domain_preserving_rewrites() {
             },
         },
     );
-    assert!(c.snapshot().cells.iter().all(|c| c.cell.output.is_none()));
+    assert_eq!(
+        c.snapshot()
+            .cells
+            .iter()
+            .find(|c| c.cell.id == id)
+            .unwrap()
+            .result_text
+            .as_deref(),
+        Some("1")
+    );
     let s = transform(&mut c, "simplify", id);
     assert_eq!(s.cells.last().unwrap().result_text.as_deref(), Some("1"));
     for (domain, expected) in [
