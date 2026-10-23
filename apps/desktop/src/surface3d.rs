@@ -313,13 +313,23 @@ fn sample(
         heights: [min, max],
     })
 }
+pub fn document_changed(app: &tauri::AppHandle) {
+    let cell = app
+        .state::<super::Shared>()
+        .0
+        .lock()
+        .unwrap()
+        .core
+        .project()
+        .current()
+        .selected;
+    app.state::<Surface3d>().state.lock().unwrap().cell = cell;
+    refresh(app);
+}
 pub fn refresh(app: &tauri::AppHandle) {
     let state = app.state::<Surface3d>();
     let (ticket, view) = {
         let mut s = state.state.lock().unwrap();
-        if s.cell.is_none() {
-            return;
-        }
         let ticket = state.ticket.fetch_add(1, Ordering::AcqRel) + 1;
         s.status = "working".into();
         (ticket, s.clone())

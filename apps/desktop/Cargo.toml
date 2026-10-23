@@ -15,5 +15,6 @@ bytemuck = { workspace = true, features = ["derive"] }
 threex-core = { path = "../../vendor/threex/crates/core" }
 threex-renderer = { path = "../../vendor/threex/crates/renderer" }
 tempfile = "3.27"
+tauri-plugin-dialog = "=2.7.2"
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSWindow", "NSView"] }

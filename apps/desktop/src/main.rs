@@ -1,24 +1,25 @@
 mod axes3d;
+mod files;
 mod layout;
 mod plot;
 mod surface3d;
 mod surface_gpu;
 mod window_placement;
 mod workspace;
+use files::{DocumentSnapshot as Snapshot, Session};
 use serde::Serialize;
 use std::sync::Mutex;
-use symbio_core::{AppCore, Project, ProjectStore, Request, Snapshot};
+use symbio_core::{AppCore, Project, ProjectStore, Request};
 use tauri::{Emitter, Manager};
-struct Session {
-    core: AppCore,
-    store: ProjectStore,
-}
 struct Shared(Mutex<Session>);
 #[derive(Default)]
 struct Drafts(Mutex<std::collections::BTreeSet<String>>);
 #[tauri::command]
-fn set_draft(webview: tauri::Webview, pending: bool) -> Result<(), UiError> {
+fn set_draft(webview: tauri::Webview, pending: bool, generation: u64) -> Result<(), UiError> {
     authorize(&webview)?;
+    let shared = webview.state::<Shared>();
+    let session = shared.0.lock().map_err(|_| error("internal_error"))?;
+    session.check_generation(generation)?;
     let state = webview.state::<Drafts>();
     let mut views = state.0.lock().map_err(|_| error("internal_error"))?;
     if pending {
@@ -64,7 +65,6 @@ fn snapshot(webview: tauri::Webview, state: tauri::State<Shared>) -> Result<Snap
         .0
         .lock()
         .map_err(|_| error("internal_error"))?
-        .core
         .snapshot())
 }
 #[tauri::command]
@@ -100,12 +100,14 @@ async fn preview_latex(
     webview: tauri::Webview,
     source: String,
     id: Option<u64>,
+    generation: u64,
 ) -> Result<symbio_core::latex::Preview, UiError> {
     authorize(&webview)?;
     let app = webview.app_handle().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<Shared>();
         let session = state.0.lock().map_err(|_| error("internal_error"))?;
+        session.check_generation(generation)?;
         session
             .core
             .preview_latex(&source, id)
@@ -129,12 +131,17 @@ async fn convert_source(
     .map_err(|_| error("internal_error"))?
 }
 #[tauri::command]
-async fn edit(webview: tauri::Webview, request: Request) -> Result<Snapshot, UiError> {
+async fn edit(
+    webview: tauri::Webview,
+    request: Request,
+    generation: u64,
+) -> Result<Snapshot, UiError> {
     authorize(&webview)?;
     let app = webview.app_handle().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<Shared>();
         let mut session = state.0.lock().map_err(|_| error("internal_error"))?;
+        session.check_generation(generation)?;
         if matches!(
             request.command,
             symbio_core::Command::Compact {}
@@ -153,7 +160,8 @@ async fn edit(webview: tauri::Webview, request: Request) -> Result<Snapshot, UiE
         {
             return Err(error("draft_pending"));
         }
-        let snapshot = session.core.apply(request)?;
+        session.core.apply(request)?;
+        let snapshot = session.snapshot();
         let _ = app.emit("symbio://changed", &snapshot);
         drop(session);
         surface3d::refresh(&app);
@@ -163,38 +171,18 @@ async fn edit(webview: tauri::Webview, request: Request) -> Result<Snapshot, UiE
     .map_err(|_| error("internal_error"))?
 }
 #[tauri::command]
-async fn save(webview: tauri::Webview) -> Result<Snapshot, UiError> {
+async fn save(webview: tauri::Webview, generation: u64) -> Result<Snapshot, UiError> {
     authorize(&webview)?;
     let app = webview.app_handle().clone();
-    let _ = app.emit("symbio://prepare-save", ());
     tauri::async_runtime::spawn_blocking(move || {
-        for _ in 0..100 {
-            if app
-                .state::<Drafts>()
-                .0
-                .lock()
-                .map_err(|_| error("internal_error"))?
-                .is_empty()
-            {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-        if !app
-            .state::<Drafts>()
-            .0
-            .lock()
-            .map_err(|_| error("internal_error"))?
-            .is_empty()
-        {
-            return Err(error("draft_pending"));
-        }
+        let op = app.state::<files::FileOperation>();
+        let _guard = op.acquire()?;
+        files::prepare(&app)?;
         let state = app.state::<Shared>();
         let mut s = state.0.lock().map_err(|_| error("internal_error"))?;
-        let Session { core, store } = &mut *s;
-        store.save(core.project())?;
-        core.mark_saved();
-        let out = core.snapshot();
+        s.check_generation(generation)?;
+        s.save()?;
+        let out = s.snapshot();
         let _ = app.emit("symbio://changed", &out);
         Ok(out)
     })
@@ -206,14 +194,12 @@ fn inspect(
     webview: tauri::Webview,
     state: tauri::State<Shared>,
     id: u64,
+    generation: u64,
 ) -> Result<serde_json::Value, UiError> {
     authorize(&webview)?;
-    Ok(state
-        .0
-        .lock()
-        .map_err(|_| error("internal_error"))?
-        .core
-        .inspect(id)?)
+    let session = state.0.lock().map_err(|_| error("internal_error"))?;
+    session.check_generation(generation)?;
+    Ok(session.core.inspect(id)?)
 }
 #[tauri::command]
 fn export_document(
@@ -233,6 +219,8 @@ fn export_document(
 }
 fn main() {
     let result = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .manage(files::FileOperation::default())
         .manage(plot::Plot::default())
         .manage(surface3d::Surface3d::default())
         .manage(Drafts::default())
@@ -243,7 +231,7 @@ fn main() {
             } else if args.is_empty() {
                 let dir = app.path().app_data_dir()?;
                 std::fs::create_dir_all(&dir)?;
-                dir.join("workspace.symbio")
+                files::last_project(app.handle()).unwrap_or_else(|| dir.join("workspace.symbio"))
             } else {
                 return Err("usage: symbio-desktop [--project /path/project.symbio]".into());
             };
@@ -256,10 +244,10 @@ fn main() {
                     p
                 }
             };
-            app.manage(Shared(Mutex::new(Session {
-                core: AppCore::new(project)?,
+            app.manage(Shared(Mutex::new(Session::new(
+                AppCore::new(project)?,
                 store,
-            })));
+            ))));
             let path = std::env::var_os("SYMBIO_LAYOUT_PATH")
                 .map(std::path::PathBuf::from)
                 .unwrap_or(app.path().app_config_dir()?.join("dock-layout.json"));
@@ -278,6 +266,8 @@ fn main() {
             snapshot,
             edit,
             save,
+            files::open_document,
+            files::save_as,
             inspect,
             export_document,
             plot::show_plot,
@@ -358,7 +348,9 @@ fn main() {
             if window.label() == "main"
                 && let tauri::WindowEvent::CloseRequested { api, .. } = event
             {
-                if window.state::<workspace::Workspace>().busy() {
+                if window.state::<workspace::Workspace>().busy()
+                    || window.state::<files::FileOperation>().busy()
+                {
                     api.prevent_close();
                     return;
                 }
