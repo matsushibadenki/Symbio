@@ -357,6 +357,18 @@
           "required": [
             "method"
           ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "method": {
+              "const": "math.compact"
+            }
+          },
+          "required": [
+            "method"
+          ]
         }
       ]
     }

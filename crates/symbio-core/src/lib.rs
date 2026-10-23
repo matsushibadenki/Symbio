@@ -1,5 +1,6 @@
 //! Symbio's UI-independent owner: all operations are revision-checked transactions.
 pub mod algebra;
+pub mod collection;
 pub mod dependencies;
 pub mod exchange;
 pub mod graph;
@@ -12,7 +13,7 @@ pub use model::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 pub use storage::ProjectStore;
-pub const ENGINE: &str = "symbio-rust/0.3.0";
+pub const ENGINE: &str = "symbio-rust/0.4.0";
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("revision conflict")]
@@ -85,6 +86,8 @@ pub enum Command {
         symbol: String,
         assumption: Assumption,
     },
+    #[serde(rename = "math.compact")]
+    Compact {},
     #[serde(rename = "math.recalculate")]
     Recalculate { id: Option<u64> },
     #[serde(rename = "math.transform")]
@@ -150,6 +153,7 @@ pub struct Snapshot {
     pub assumptions: BTreeMap<String, Assumption>,
     pub history: Vec<Event>,
     pub node_count: usize,
+    pub graph_stats: collection::GraphStats,
     pub engine: String,
     pub dependencies: Vec<dependencies::DependencyEdge>,
     pub calculation_order: Vec<u64>,
@@ -294,6 +298,7 @@ impl AppCore {
             assumptions: b.assumptions.clone(),
             history: p.history.iter().rev().take(32).cloned().collect(),
             node_count: p.graph.nodes.len(),
+            graph_stats: collection::stats(p).expect("validated project graph"),
             engine: ENGINE.into(),
             dependencies: dag.edges(),
             calculation_order: dag.order,
@@ -311,7 +316,19 @@ impl AppCore {
             Command::Redo => {
                 next = self.redo.last().cloned().ok_or(Error::HistoryEmpty)?;
             }
-            command => execute(&mut next, command)?,
+            command => {
+                if let Err(error) = execute(&mut next, command) {
+                    if !matches!(error, Error::Limit) {
+                        return Err(error);
+                    }
+                    // Discard partially built nodes, collect only the valid starting state, then retry once.
+                    next = self.project.clone();
+                    if collection::compact(&mut next)? == 0 {
+                        return Err(error);
+                    }
+                    execute(&mut next, command)?;
+                }
+            }
         }
         next.revision = self.project.revision.checked_add(1).ok_or(Error::Limit)?;
         // Audit log records actual operations, including history navigation.
@@ -325,6 +342,9 @@ impl AppCore {
         });
         if next.history.len() > 256 {
             next.history.remove(0);
+        }
+        if next.graph.nodes.len() >= 2048 && collection::stats(&next)?.unused >= 256 {
+            collection::compact(&mut next)?;
         }
         next.validate()?;
         match request.command {
@@ -348,9 +368,13 @@ impl AppCore {
         Ok(self.snapshot())
     }
     pub fn preview_latex(&self, source: &str, id: Option<u64>) -> Result<latex::Preview> {
-        let mut graph = self.project.graph.clone();
+        let mut preview = self.project.clone();
+        if preview.graph.nodes.len() >= 2048 && collection::stats(&preview)?.unused >= 256 {
+            collection::compact(&mut preview)?;
+        }
+        let mut branch = preview.current().clone();
+        let mut graph = preview.graph;
         let root = latex::parse(&mut graph, source)?;
-        let mut branch = self.project.current().clone();
         if let Some(id) = id {
             let cell = branch
                 .cells
@@ -395,6 +419,9 @@ impl AppCore {
 }
 fn execute(p: &mut Project, command: &Command) -> Result<()> {
     match command {
+        Command::Compact {} => {
+            collection::compact(p)?;
+        }
         Command::Define { id, name, source } | Command::DefineLatex { id, name, source } => {
             let source_format = if matches!(command, Command::DefineLatex { .. }) {
                 SourceFormat::Latex

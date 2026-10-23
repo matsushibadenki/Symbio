@@ -1,4 +1,4 @@
-//! Immutable, structurally interned DAG. Node IDs are append-only and document-local.
+//! Immutable, structurally interned DAG. Node IDs are append-only between collections and revision-local.
 use crate::{Error, Result};
 use num_bigint::BigInt;
 use num_rational::BigRational;

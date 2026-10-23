@@ -100,3 +100,9 @@ Definitions automatically attempt their saved recipe, defaulting to Compute for 
 Contextual CLI `math.preview_latex` also accepts optional `id` to preview a replacement source, including its prospective cycle check. Desktop previews use the current branch in an isolated graph without mutating the document. The standalone LaTeX parser has no external cell context.
 
 KOMYAKU import expands reference definitions to bounded self-contained LaTeX before returning its source draft. It does not import saved outputs or trust claims. Unsupported or oversized expansions fail explicitly.
+
+## SEG collection
+
+`{"expected_revision":45,"actor":"human","command":{"method":"math.compact"}}` collects unreachable SEG nodes across all branches as an undoable, revision-checked transaction. No extra command fields are accepted. Snapshots include `graph_stats: {total, live, unused}`; counts include input, resolved-definition and output roots, shared globally across branches. Cell IDs remain stable, while SEG IDs are valid only with the snapshot revision and can be remapped by collection. Inspect again after a mutation rather than persisting SEG IDs as references.
+
+Automatic collection runs after successful mutations at 2,048 total nodes with at least 256 unused. A resource-limited operation may collect the original valid project and retry once; if it still fails, all changes are rolled back. Pure contextual previews can collect an isolated copy. Undo/Redo retains separate bounded graph snapshots. Desktop manual collection rejects pending drafts, like history navigation.

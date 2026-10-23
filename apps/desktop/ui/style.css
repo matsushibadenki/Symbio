@@ -68,3 +68,11 @@ html:has(.surface-body),body.surface-body,.surface-body #app,.surface-panel{back
 .surface-axis-label[data-axis=x]{color:var(--axis-x)}.surface-axis-label[data-axis=y]{color:var(--axis-y)}.surface-axis-label[data-axis=z]{color:var(--axis-z)}
 
 .surface-status[data-error=true]{color:var(--color-error)}
+
+.graph-editor{padding:12px;border:1px solid var(--color-line);background:var(--color-paper);margin-bottom:16px;min-width:0}
+.graph-editor-title,.graph-editor-row{display:flex;align-items:center;gap:6px;margin-bottom:8px;min-width:0}.graph-editor-title strong{font-size:12px}.graph-editor-row input{flex:1;width:80px}.graph-editor-row select{max-width:106px}.graph-editor-row .small{font-size:10px;line-height:1.4;max-height:42px;overflow:auto}.graph-editor textarea{width:100%;font-family:var(--font-code);font-size:12px}.graph-editor .formula{padding:12px 22px 12px 4px}.graph-editor .formula math{font-size:24px}.graph-editor[data-draft=true]>.graph-output{display:none}
+.dependency-window-content{display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,340px);overflow:hidden;padding:0!important;gap:0}
+.dependency-diagram{overflow:auto;min-width:0;min-height:0}.dependency-diagram>.dependency-scroll{height:100%;margin:0;border:0;max-height:none}
+.dependency-editor-pane{overflow:auto;padding:12px;border-left:1px solid var(--color-line);background:var(--color-panel)}
+@media(max-width:700px){.dependency-window-content{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(180px,1fr) minmax(200px,1fr)}.dependency-editor-pane{border-left:0;border-top:1px solid var(--color-line)}}
+.graph-editor[data-draft=true] .input-render>.formula{opacity:1}

@@ -137,7 +137,8 @@ async fn edit(webview: tauri::Webview, request: Request) -> Result<Snapshot, UiE
         let mut session = state.0.lock().map_err(|_| error("internal_error"))?;
         if matches!(
             request.command,
-            symbio_core::Command::Recalculate { .. }
+            symbio_core::Command::Compact {}
+                | symbio_core::Command::Recalculate { .. }
                 | symbio_core::Command::Checkout { .. }
                 | symbio_core::Command::Branch { .. }
                 | symbio_core::Command::Undo
@@ -289,6 +290,22 @@ fn main() {
         ])
         .on_window_event(|window, event| {
             if window.label() == "dependencies" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event
+                    && window
+                        .state::<Drafts>()
+                        .0
+                        .lock()
+                        .map(|drafts| drafts.contains("dependencies"))
+                        .unwrap_or(true)
+                {
+                    api.prevent_close();
+                    let _ = window.app_handle().emit("symbio://close-blocked", ());
+                }
+                if matches!(event, tauri::WindowEvent::Destroyed)
+                    && let Ok(mut drafts) = window.state::<Drafts>().0.lock()
+                {
+                    drafts.remove("dependencies");
+                }
                 return;
             }
             if window.label() == "plot" {

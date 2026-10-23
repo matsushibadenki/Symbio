@@ -20,7 +20,7 @@ Tauri child WebViews              CLI (JSONL)
 
 ## Rust ownership
 
-`crates/symbio-core` is GUI-independent. `Project` owns the append-only, hash-interned node arena, branch cells, assumptions, selection and history. `AppCore` owns revision checks and bounded undo/redo. There is one `Shared<Session>` in Tauri app state. Child WebViews hold only presentation snapshots and uncommitted editor drafts, never an authoritative document or evaluator. The draft registry prevents losing pending edits on branch/history operations.
+`crates/symbio-core` is GUI-independent. `Project` owns the hash-interned node arena (append-only between collections), branch cells, assumptions, selection and history. `AppCore` owns revision checks and bounded undo/redo. There is one `Shared<Session>` in Tauri app state. Child WebViews hold only presentation snapshots and uncommitted editor drafts, never an authoritative document or evaluator. The draft registry prevents losing pending edits on branch/history operations.
 
 `apps/desktop/src/layout.rs` owns a binary split/tab tree. `workspace.rs` manages stable child WebView identities, native reparenting, drop previews and revision-checked transitions. `window_placement.rs` restores geometry against current monitor bounds and DPI. The layout is separate from the mathematical document.
 
@@ -40,7 +40,7 @@ Every mutation supplies the current revision. Validation precedes commit; confli
 
 An advisory file lock excludes cooperating writers. Saving compares file bytes with the loaded baseline, then writes/syncs a same-directory temporary file, atomically renames it and syncs the directory on Unix. Files larger than 8 MiB are rejected. Invalid/version-mismatched documents are not silently replaced. This detects external changes but is not a distributed filesystem transaction.
 
-Resource limits include 16,000 SEG nodes, 128 cells per branch, 16 branches, 64 assumptions, 2,048-byte source, parser depth 64 and 512 tokens, degree 32, 32 undo states, 256 audit events and 64 KiB CLI request lines. Nodes are not yet garbage-collected, so long sessions can reach the graph limit.
+Resource limits include 16,000 SEG nodes, 128 cells per branch, 16 branches, 64 assumptions, 2,048-byte source, parser depth 64 and 512 tokens, degree 32, 32 undo states, 256 audit events and 64 KiB CLI request lines. Automatic collection bounds accumulated unused structure; the graph limit still applies to live data and to each attempted computation.
 
 ## Extension boundaries
 
@@ -75,3 +75,9 @@ The inspector opens the dependency diagram in a dedicated native window with adj
 Dock layout version 4 migrates v1–v3 layouts to include the new surface panel, preserving existing panel identities and placement. The new panel joins a docked Notebook as a tab, or floats when Notebook is already floating. New and reset layouts use three columns with a wide central Notebook / 3D tab group. Existing v4 custom layouts remain saved until Reset workspace is requested. Floating-window preferences migrate three host slots to four.
 
 `axes3d.rs` builds colored boundary rulers with bounded 1/2/2.5/5/10 tick spacing. Mesh normalization and ruler mapping use the same independent domain bounds and original sampled z extrema. Rust projects small semantic text anchors with the exact GPU camera and WebGPU screen convention. The transparent WebView lays out those labels and suppresses overlaps; no vertex or frame data crosses IPC. GPU ruler line storage is a bounded reusable buffer. The controls reserve 210 logical pixels above the viewport; native scissor and WebView stage share that geometry. Domain updates validate both axes before publication, and invalidate outstanding sampler generations while holding the same view-state lock.
+
+## Collection and graph-based editing
+
+`collection.rs` marks cell input, resolved-definition and output roots across all branches, then rebuilds live nodes in topological order with structural interning. It remaps a cloned document and validates it before replacing any state. Cell IDs and semantic metadata stay stable; SEG IDs are revision-scoped. `AppCore` compacts after a successful mutation at 2,048 total / 256 unused nodes and retries a resource-limited command once against a compacted clone of the original state. Failed edits never publish partial collection. Preview compaction remains isolated. History commands refer to cell IDs and authored sources; Undo snapshots retain separate complete graphs.
+
+Graph editors use the same Define / DefineLatex commands as Notebook and the same pure contextual preview. WebViews retain only local drafts, including a base definition stamp to detect edits from another panel. Apply preserves the existing calculation recipe and triggers the dependency closure. The shared draft registry protects branch/history/collection commands and native graph-window closing; Destroyed events release its draft entry. Graph-window Save uses the existing shared-document save protocol. Graph editing currently edits authored cell source rather than directly manipulating SEG subexpressions or edges.
