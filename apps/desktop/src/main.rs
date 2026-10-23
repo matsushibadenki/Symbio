@@ -1,3 +1,4 @@
+mod axes3d;
 mod layout;
 mod plot;
 mod surface3d;

@@ -23,7 +23,8 @@ pub struct ViewState {
     pub cell: Option<u64>,
     pub revision: u64,
     pub branch: String,
-    pub range: [f64; 2],
+    pub x_range: [f64; 2],
+    pub y_range: [f64; 2],
     pub orbit: [f32; 3],
     pub wire: bool,
     pub samples: usize,
@@ -37,7 +38,8 @@ impl Default for ViewState {
             cell: None,
             revision: 0,
             branch: String::new(),
-            range: [-5., 5.],
+            x_range: [-5., 5.],
+            y_range: [-5., 5.],
             orbit: [0.7, 0.6, 1.],
             wire: true,
             samples: 0,
@@ -57,7 +59,7 @@ pub struct Surface3d {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
     Select { id: u64 },
-    Range { min: f64, max: f64 },
+    Range { x: [f64; 2], y: [f64; 2] },
     Orbit { yaw: f32, pitch: f32, zoom: f32 },
     Wire { enabled: bool },
     Reset,
@@ -137,18 +139,7 @@ fn apply_command(app: &tauri::AppHandle, command: Command) -> Result<ViewState, 
         let mut s = state.state.lock().map_err(|_| error("internal_error"))?;
         match command {
             Command::Select { .. } => s.cell = selected,
-            Command::Range { min, max } => {
-                if !min.is_finite()
-                    || !max.is_finite()
-                    || min >= max
-                    || max - min < 1e-6
-                    || min.abs() > 1e6
-                    || max.abs() > 1e6
-                {
-                    return Err(error("domain_error"));
-                }
-                s.range = [min, max];
-            }
+            Command::Range { x, y } => set_ranges(&mut s, x, y)?,
             Command::Orbit { yaw, pitch, zoom } => {
                 if ![yaw, pitch, zoom].iter().all(|v| v.is_finite())
                     || !(-1.45..=1.45).contains(&pitch)
@@ -161,6 +152,9 @@ fn apply_command(app: &tauri::AppHandle, command: Command) -> Result<ViewState, 
             Command::Wire { enabled } => s.wire = enabled,
             Command::Reset => s.orbit = ViewState::default().orbit,
         }
+        if resample {
+            state.ticket.fetch_add(1, Ordering::AcqRel);
+        }
     }
     if resample {
         refresh(app)
@@ -168,6 +162,17 @@ fn apply_command(app: &tauri::AppHandle, command: Command) -> Result<ViewState, 
         publish(app)
     }
     Ok(state.state.lock().unwrap().clone())
+}
+fn set_ranges(state: &mut ViewState, x: [f64; 2], y: [f64; 2]) -> Result<(), UiError> {
+    if [x, y]
+        .iter()
+        .any(|r| !r.iter().all(|v| v.is_finite() && v.abs() <= 1e6) || r[1] - r[0] < 1e-6)
+    {
+        return Err(error("surface_range"));
+    }
+    state.x_range = x;
+    state.y_range = y;
+    Ok(())
 }
 fn accepts(a: Option<&Assumption>, v: f64) -> bool {
     a.is_none_or(|a| {
@@ -187,7 +192,8 @@ fn sample(
     graph: &Graph,
     mut root: Id,
     assumptions: &BTreeMap<String, Assumption>,
-    range: [f64; 2],
+    x_range: [f64; 2],
+    y_range: [f64; 2],
 ) -> Result<Mesh, &'static str> {
     if let Node::Equation(a, b) = graph.nodes[root] {
         if matches!(&graph.nodes[a],Node::Symbol(s) if s=="z") {
@@ -206,8 +212,8 @@ fn sample(
     let mut count = 0;
     for i in 0..n {
         for j in 0..n {
-            let x = range[0] + (range[1] - range[0]) * j as f64 / STEPS as f64;
-            let y = range[0] + (range[1] - range[0]) * i as f64 / STEPS as f64;
+            let x = x_range[0] + (x_range[1] - x_range[0]) * j as f64 / STEPS as f64;
+            let y = y_range[0] + (y_range[1] - y_range[0]) * i as f64 / STEPS as f64;
             if !accepts(assumptions.get("x"), x) || !accepts(assumptions.get("y"), y) {
                 continue;
             }
@@ -299,13 +305,6 @@ fn sample(
             lines.extend([Vertex { position: a, color }, Vertex { position: b, color }]);
         }
     }
-    for (a, b, color) in [
-        ([-2.2, -1.35, 0.], [2.2, -1.35, 0.], [0.68, 0.25, 0.23]),
-        ([0., -1.35, -2.2], [0., -1.35, 2.2], [0.18, 0.54, 0.42]),
-        ([0., -1.35, 0.], [0., 1.65, 0.], [0.29, 0.40, 0.73]),
-    ] {
-        lines.extend([Vertex { position: a, color }, Vertex { position: b, color }]);
-    }
     Ok(Mesh {
         triangles,
         lines,
@@ -316,14 +315,14 @@ fn sample(
 }
 pub fn refresh(app: &tauri::AppHandle) {
     let state = app.state::<Surface3d>();
-    let ticket = state.ticket.fetch_add(1, Ordering::AcqRel) + 1;
-    let view = {
+    let (ticket, view) = {
         let mut s = state.state.lock().unwrap();
         if s.cell.is_none() {
             return;
         }
+        let ticket = state.ticket.fetch_add(1, Ordering::AcqRel) + 1;
         s.status = "working".into();
-        s.clone()
+        (ticket, s.clone())
     };
     publish(app);
     let app = app.clone();
@@ -347,7 +346,7 @@ pub fn refresh(app: &tauri::AppHandle) {
                 })
         };
         let (result, revision, branch) = match input {
-            Some((g, r, a, v, b)) => (sample(&g, r, &a, view.range), v, b),
+            Some((g, r, a, v, b)) => (sample(&g, r, &a, view.x_range, view.y_range), v, b),
             None => (Err("missing_reference"), 0, String::new()),
         };
         let state = app.state::<Surface3d>();
@@ -389,6 +388,29 @@ pub fn refresh(app: &tauri::AppHandle) {
         publish(&app);
     });
 }
+#[derive(Clone, Serialize)]
+struct AxisFrame {
+    labels: Vec<super::axes3d::ScreenLabel>,
+    cell: Option<u64>,
+    revision: u64,
+    x_range: [f64; 2],
+    y_range: [f64; 2],
+    orbit: [f32; 3],
+    heights: Option<[f64; 2]>,
+}
+impl AxisFrame {
+    fn new(view: &ViewState, labels: Vec<super::axes3d::ScreenLabel>) -> Self {
+        Self {
+            labels,
+            cell: view.cell,
+            revision: view.revision,
+            x_range: view.x_range,
+            y_range: view.y_range,
+            orbit: view.orbit,
+            heights: view.heights,
+        }
+    }
+}
 pub fn draw(app: &tauri::AppHandle) {
     let workspace = app.state::<super::workspace::Workspace>();
     let layout = workspace.effective();
@@ -428,12 +450,21 @@ pub fn draw(app: &tauri::AppHandle) {
             None
         };
         let region = rect.and_then(|[x, y, w, h]| {
-            let top = (176. * scale).round() as u32;
+            let top = (210. * scale).round() as u32;
             let bottom = (24. * scale).round() as u32;
             (h > top + bottom && w > 0).then(|| [x, y + top, w, h - top - bottom])
         });
         let aspect = region.map_or(1., |r| r[2] as f32 / r[3].max(1) as f32);
         let matrix = camera(s.orbit, aspect);
+        let axes = s
+            .heights
+            .filter(|_| s.status == "ready" && s.wire && region.is_some())
+            .map(|z| super::axes3d::Axes::build(s.x_range, s.y_range, z, s.orbit[0]));
+        gpu.upload_axes(axes.as_ref().map_or(&[], |a| a.lines.as_slice()));
+        if label == host {
+            let labels = axes.as_ref().map_or_else(Vec::new, |a| a.project(matrix));
+            let _ = app.emit("symbio://surface-axes", AxisFrame::new(&s, labels));
+        }
         if let Err(e) = gpu.draw(label, [size.width, size.height], region, &matrix, s.wire) {
             eprintln!("Symbio 3D: {e}");
         }
@@ -467,7 +498,7 @@ mod tests {
     fn surface_sampling_masks_domains_and_retains_exact_extents() {
         let mut g = Graph::default();
         let root = symbio_core::parser::parse(&mut g, "x^2-y^2").unwrap();
-        let m = sample(&g, root, &BTreeMap::new(), [-2., 2.]).unwrap();
+        let m = sample(&g, root, &BTreeMap::new(), [-2., 2.], [-2., 2.]).unwrap();
         assert_eq!(m.samples, 4225);
         assert_eq!(m.heights, [-4., 4.]);
         assert!(!m.triangles.is_empty());
@@ -482,11 +513,11 @@ mod tests {
     fn holes_are_not_bridged_and_unsupported_symbols_reject() {
         let mut g = Graph::default();
         let root = symbio_core::parser::parse(&mut g, "1/x").unwrap();
-        let m = sample(&g, root, &BTreeMap::new(), [-2., 2.]).unwrap();
+        let m = sample(&g, root, &BTreeMap::new(), [-2., 2.], [-2., 2.]).unwrap();
         assert_eq!(m.omitted, 65);
         let root = symbio_core::parser::parse(&mut g, "t+x").unwrap();
         assert_eq!(
-            sample(&g, root, &BTreeMap::new(), [-2., 2.]).err(),
+            sample(&g, root, &BTreeMap::new(), [-2., 2.], [-2., 2.]).err(),
             Some("surface_variable")
         );
     }
@@ -519,12 +550,12 @@ mod semantic_tests {
                 ..Default::default()
             },
         )]);
-        let m = sample(&g, root, &a, [-2., 2.]).unwrap();
+        let m = sample(&g, root, &a, [-2., 2.], [-2., 2.]).unwrap();
         assert_eq!(m.samples, 33 * 65);
         assert_eq!(m.omitted, 32 * 65);
         let bad = symbio_core::latex::parse(&mut g, "x^2+y^2=1").unwrap();
         assert_eq!(
-            sample(&g, bad, &a, [-2., 2.]).err(),
+            sample(&g, bad, &a, [-2., 2.], [-2., 2.]).err(),
             Some("surface_equation")
         );
     }
@@ -538,5 +569,46 @@ mod semantic_tests {
                 assert!(m[3][3] > 0.);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod range_tests {
+    use super::*;
+    #[test]
+    fn separate_domains_change_numeric_bounds_independently() {
+        let mut g = Graph::default();
+        let root = symbio_core::parser::parse(&mut g, "x+10*y").unwrap();
+        let mesh = sample(&g, root, &BTreeMap::new(), [-2., 2.], [10., 30.]).unwrap();
+        assert_eq!(mesh.heights, [98., 302.]);
+        assert_eq!(mesh.samples, 4225);
+        let changed = sample(&g, root, &BTreeMap::new(), [-1., 1.], [10., 30.]).unwrap();
+        assert_eq!(changed.heights, [99., 301.]);
+    }
+    #[test]
+    fn invalid_second_axis_never_changes_the_first_axis() {
+        let mut view = ViewState::default();
+        let before = (view.x_range, view.y_range);
+        for bad in [[2., 2.], [3., -3.], [0., f64::NAN], [-1e7, 1.], [0., 1e-8]] {
+            assert!(set_ranges(&mut view, [-2., 2.], bad).is_err());
+            assert_eq!((view.x_range, view.y_range), before);
+        }
+        set_ranges(&mut view, [-2., 2.], [10., 30.]).unwrap();
+        assert_eq!(view.x_range, [-2., 2.]);
+        assert_eq!(view.y_range, [10., 30.]);
+    }
+}
+
+#[cfg(test)]
+mod transport_tests {
+    #[test]
+    fn frame_and_view_camera_stamps_have_identical_json_precision() {
+        let view = super::ViewState::default();
+        let frame = super::AxisFrame::new(&view, vec![]);
+        let view: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&view).unwrap()).unwrap();
+        let frame: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&frame).unwrap()).unwrap();
+        assert_eq!(view["orbit"], frame["orbit"]);
     }
 }

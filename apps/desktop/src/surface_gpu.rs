@@ -25,6 +25,8 @@ pub struct Gpu {
     mesh: Option<wgpu::Buffer>,
     grid: Option<wgpu::Buffer>,
     counts: [u32; 2],
+    axes: Option<wgpu::Buffer>,
+    axis_count: u32,
 }
 impl Gpu {
     /// Surface/layer creation must happen on AppKit's event-loop thread, before WKWebViews.
@@ -171,6 +173,8 @@ impl Gpu {
             mesh: None,
             grid: None,
             counts: [0; 2],
+            axes: None,
+            axis_count: 0,
         })
     }
     pub fn upload(&mut self, mesh: &[Vertex], grid: &[Vertex]) {
@@ -187,6 +191,25 @@ impl Gpu {
         };
         self.mesh = buffer(mesh);
         self.grid = buffer(grid);
+    }
+    pub fn upload_axes(&mut self, vertices: &[Vertex]) {
+        self.axis_count = vertices.len().min(256) as u32;
+        if self.axis_count == 0 {
+            return;
+        }
+        let buffer = self.axes.get_or_insert_with(|| {
+            self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("3D axis rulers"),
+                size: 256 * 24,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        });
+        self.queue.write_buffer(
+            buffer,
+            0,
+            bytemuck::cast_slice(&vertices[..self.axis_count as usize]),
+        );
     }
     pub fn draw(
         &mut self,
@@ -284,6 +307,14 @@ impl Gpu {
                     pass.set_pipeline(&self.lines);
                     pass.set_vertex_buffer(0, grid.slice(..));
                     pass.draw(0..self.counts[1], 0..1);
+                }
+                if wire
+                    && self.axis_count > 0
+                    && let Some(axes) = &self.axes
+                {
+                    pass.set_pipeline(&self.lines);
+                    pass.set_vertex_buffer(0, axes.slice(..));
+                    pass.draw(0..self.axis_count, 0..1);
                 }
             }
         }

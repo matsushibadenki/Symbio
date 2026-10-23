@@ -1,12 +1,13 @@
 import {t,setLocale,locale} from './i18n.js';
 import {icon} from './icons.js';
+import {renderSurfaceAxes} from './surface-axes.js';
 import {dependencyLayout} from './dependency-layout.js';
 import {bindLatexPreview} from './latex-preview.js';
 import {createMathKeyboard} from './math-keyboard.js';
 import {bindDock,renderTabs,bindSplitter} from './dock.js';
 const api=window.__TAURI__;const view=new URLSearchParams(location.search).get('view')||'preview';
 const root=document.getElementById('app');let current=null,layout=null,busy=false,statusKey='ready',detail='',inspection=null,inspectionRevision=-1;
-let surface=null;
+let surface=null,surfaceAxes=null;
 let dependencyZoom=view==='dependencies'?1.6:1;
 let keyboard=null;const notePreviews=new Set();
 const drafts=new Map();let draftQueue=Promise.resolve();
@@ -31,7 +32,7 @@ function showFormula(html){
 
 export async function invoke(name,args){return api.core.invoke(name,args)}
 export function getLayout(){return layout}export function getView(){return view}
-function status(key,errorDetail=''){statusKey=key;detail=errorDetail;document.querySelectorAll('.status').forEach(n=>{n.textContent=t(key)+(errorDetail?` ${errorDetail}`:'');n.dataset.error=String(!['ready','working'].includes(key));});}
+function status(key,errorDetail=''){statusKey=key;detail=errorDetail;document.querySelectorAll('.status,.surface-status').forEach(n=>{n.textContent=t(key)+(errorDetail?` ${errorDetail}`:'');n.dataset.error=String(!['ready','working'].includes(key));});}
 export async function action(fn){if(busy||!api)return;busy=true;document.querySelectorAll('button').forEach(b=>b.disabled=true);status('working');try{await draftQueue;await fn();status('ready')}catch(e){status(e.code||'error',e.detail||e.message||'');if(e.code==='revision_conflict')accept(await invoke('snapshot'));if(['layout_conflict','panel_error','layout_save_failed'].includes(e.code))applyLayout(await invoke('workspace_state'));}finally{busy=false;render();}}
 async function mutate(command){const s=await invoke('edit',{request:{expected_revision:current.revision,actor:'human',command}});accept(s);return s}
 export function dockCommand(command){return action(async()=>applyLayout(await invoke('workspace_command',{command,expectedRevision:layout.revision})))}
@@ -133,10 +134,11 @@ function surfacePanel(){
  document.body.classList.add('surface-body');
  const choose=el('select',{'aria-label':t('surface_cell'),onchange:e=>surfaceSelect(e.target.value)},...current.cells.map(c=>el('option',{value:c.id,text:c.name})));choose.value=String(surface?.cell||'');
  const preset=button('surface_example','add',()=>action(async()=>{let i=1;while(current.cells.some(c=>c.name==='surface'+i))i++;await mutate({method:'math.define_latex',id:null,name:'surface'+i,source:'\\sin(x)\\cos(y)'});surface=await invoke('surface_command',{command:{kind:'select',id:current.selected}});}));
- const range=(index)=>el('input',{type:'number',step:0.5,value:surface?.range[index]??(index?5:-5),'aria-label':t(index?'surface_max':'surface_min'),'data-focus':'range-'+index});
- const min=range(0),max=range(1);
- const apply=button('apply','check',()=>action(async()=>{if(!min.value||!max.value)throw {code:'domain_error'};surface=await invoke('surface_command',{command:{kind:'range',min:Number(min.value),max:Number(max.value)}})}));
- const controls=el('div',{class:'surface-controls'},el('div',{class:'surface-row'},choose,preset,button('surface_wire','plot',()=>action(async()=>{surface=await invoke('surface_command',{command:{kind:'wire',enabled:!surface?.wire}})}),{'aria-pressed':surface?.wire||false}),button('surface_reset','reset',()=>action(async()=>{surface=await invoke('surface_command',{command:{kind:'reset'}})})),button('surface_help','info',()=>{})),el('div',{class:'surface-row'},el('span',{text:'x, y ∈'}),min,el('span',{text:'…'}),max,apply));
+ const range=(axis,index)=>el('input',{type:'number',step:'any',value:surface?.[axis+'_range']?.[index]??(index?5:-5),'aria-label':t('surface_'+axis+'_'+(index?'max':'min')),'data-focus':'range-'+axis+'-'+index});
+ const xmin=range('x',0),xmax=range('x',1),ymin=range('y',0),ymax=range('y',1);
+ const applyRange=()=>action(async()=>{if([xmin,xmax,ymin,ymax].some(n=>!n.value||!n.validity.valid))throw {code:'surface_range'};surface=await invoke('surface_command',{command:{kind:'range',x:[Number(xmin.value),Number(xmax.value)],y:[Number(ymin.value),Number(ymax.value)]}})});
+ const row=(axis,min,max)=>el('div',{class:'surface-row'},el('span',{class:'surface-range-axis',text:axis+' ∈'}),min,el('span',{text:'…'}),max,button('apply','check',applyRange));
+ const controls=el('div',{class:'surface-controls'},el('div',{class:'surface-row'},choose,preset,button('surface_wire','plot',()=>action(async()=>{surface=await invoke('surface_command',{command:{kind:'wire',enabled:!surface?.wire}})}),{'aria-pressed':surface?.wire||false}),button('surface_reset','reset',()=>action(async()=>{surface=await invoke('surface_command',{command:{kind:'reset'}})})),button('surface_help','info',()=>{})),row('x',xmin,xmax),row('y',ymin,ymax));
  const selected=current.cells.find(c=>c.id===surface?.cell);const formula=el('div',{class:'surface-formula'});if(selected){const m=el('div',{class:'surface-math'});m.innerHTML=selected.resolved_mathml||selected.mathml;if(selected.kind!=='equation')formula.append(el('span',{class:'surface-z',text:'z ='}));formula.append(m);}else formula.textContent=t('surface_empty');
  const stage=el('div',{class:'surface-stage',tabindex:0,'aria-label':t('surface_help')});
  let drag=null,pending=false,queued=null;const send=async(command)=>{queued=command;if(pending)return;pending=true;try{while(queued){const next=queued;queued=null;surface=await invoke('surface_command',{command:next});}}catch(e){queued=null;status(e.code||'error')}finally{pending=false}};
@@ -145,18 +147,21 @@ function surfacePanel(){
  stage.onpointerup=e=>{if(stage.hasPointerCapture(e.pointerId))stage.releasePointerCapture(e.pointerId);drag=null};stage.onpointercancel=()=>drag=null;
  stage.onwheel=e=>{e.preventDefault();if(surface)send({kind:'orbit',yaw:surface.orbit[0],pitch:surface.orbit[1],zoom:Math.max(.35,Math.min(3,surface.orbit[2]*Math.exp(-e.deltaY*.002)))})};
  stage.onkeydown=e=>{if(!surface||!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','+','-','Home'].includes(e.key))return;e.preventDefault();if(e.key==='Home'){send({kind:'reset'});return}const [yaw,pitch,zoom]=surface.orbit;send({kind:'orbit',yaw:yaw+(e.key==='ArrowLeft'?-.1:e.key==='ArrowRight'?.1:0),pitch:Math.max(-1.45,Math.min(1.45,pitch+(e.key==='ArrowUp'?.1:e.key==='ArrowDown'?-.1:0))),zoom:Math.max(.35,Math.min(3,zoom*(e.key==='+'?1.1:e.key==='-'?.9:1)))})};
- const overlay=el('div',{class:'surface-overlay'});stage.append(overlay);
- const out=el('section',{class:'panel surface-panel'},header('surface'),controls,formula,stage,el('div',{class:'surface-status'}),el('div',{class:'dock-preview'}));updateSurface(out);return out;
+ const overlay=el('div',{class:'surface-overlay'});stage.append(overlay,el('div',{class:'surface-axis-labels'}));
+ const out=el('section',{class:'panel surface-panel'},header('surface'),controls,formula,stage,el('div',{class:'surface-status'}),el('div',{class:'dock-preview'}));return out;
 }
 function updateSurface(scope=root){
  const n=scope.querySelector('.surface-status');if(!n||!surface)return;
- n.textContent=surface.status==='ready'?`${surface.samples} · float64 · r${surface.revision}`:t(surface.status);
+ n.dataset.error=String(!['ready','working'].includes(statusKey));n.title=detail;
+ n.textContent=!['ready','working'].includes(statusKey)?t(statusKey):surface.status==='ready'?`${surface.samples} · float64 · r${surface.revision}`:t(surface.status);
  const overlay=scope.querySelector('.surface-overlay');if(overlay){overlay.replaceChildren();if(surface.status!=='ready')overlay.append(el('span',{class:'surface-message',text:t(surface.status)}));if(surface.heights)overlay.append(el('span',{class:'surface-heights',text:`z ∈ [${surface.heights.map(v=>Number(v.toPrecision(5))).join(', ')}]`}),el('span',{class:'surface-legend',text:`x · y · z  /  ${t('approximate')}${surface.omitted?' · '+surface.omitted+' '+t('surface_omitted'):''}`}));}
+ renderSurfaceAxes(scope.querySelector('.surface-stage'),surfaceAxes,surface);
 }
 function render(){if(!current&&!view.startsWith('split'))return;
  const focus=document.activeElement?.dataset.focus,selection=document.activeElement?.selectionStart,selectionEnd=document.activeElement?.selectionEnd;const scrolls=[...root.querySelectorAll('.content')].map(e=>e.scrollTop);
  if(view.startsWith('split')){const focused=document.activeElement?.classList.contains('splitter');root.replaceChildren(bindSplitter());if(focused)root.firstElementChild.focus();return}
  if(view==='toolbar')root.replaceChildren(toolbar());else if(view==='dependencies')root.replaceChildren(dependencyWindow());else if(view==='preview')root.replaceChildren(el('div',{class:'preview-shell'},toolbar(),el('div',{class:'preview-panels'},...['objects','notebook','inspector'].map(panel))));else root.replaceChildren(panel(view));
+ if(view==='surface')updateSurface();
  const dependencyDialog=document.querySelector('dialog.dependency-dialog');if(dependencyDialog)dependencyDialog.querySelector('.dependency-scroll').replaceWith(dependencyGraph());
  root.querySelectorAll('.content').forEach((e,i)=>e.scrollTop=scrolls[i]||0);
  if(focus){const f=[...root.querySelectorAll('[data-focus]')].find(n=>n.dataset.focus===focus);f?.focus();if(f&&selection!=null)f.setSelectionRange(selection,selectionEnd??selection)}
@@ -165,5 +170,5 @@ function render(){if(!current&&!view.startsWith('split'))return;
 async function showJson(){if(!api)return;await action(async()=>{const text=await invoke('export_document');const textarea=el('textarea',{'aria-label':t('json'),readonly:''});textarea.value=text;const dialog=el('dialog',{},el('div',{class:'dialog-head'},el('strong',{text:t('json')}),button('close','close',()=>dialog.close())),textarea,button('copy','json',()=>textarea.select()));dialog.addEventListener('close',()=>dialog.remove());document.body.append(dialog);dialog.showModal();});}
 document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key==='s'){e.preventDefault();action(async()=>{await flushDrafts();accept(await invoke('save'))})}if((e.metaKey||e.ctrlKey)&&e.key==='z'&&!e.target.closest('input,textarea')){e.preventDefault();action(()=>mutate({method:e.shiftKey?'math.redo':'math.undo'}))}if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){const c=current.cells.find(c=>c.id===Number(e.target.closest('[data-cell]')?.dataset.cell));if(c){e.preventDefault();action(async()=>{await commit(c);await mutate({method:'math.transform',id:c.id,operation:'compute',variable:'x',bindings:{}})})}}});
 async function start(){if(!api){try{current=await(await fetch('./preview.json')).json();setLocale('en');layout={revision:0,locale:'en',floating:[],floating_groups:[],root:{kind:'split',first:{kind:'tabs',panels:['objects'],active:'objects'},second:{kind:'split',first:{kind:'tabs',panels:['notebook'],active:'notebook'},second:{kind:'tabs',panels:['inspector'],active:'inspector'}}}};render()}catch{root.textContent=t('preview')}return}
- try{if(view==='surface'){document.body.classList.add('surface-body');surface=await invoke('surface_state');await api.event.listen('symbio://surface',e=>{const previous=surface?.cell;surface=e.payload;if(previous!==surface.cell&&!busy)render();else updateSurface()})}await api.event.listen('symbio://prepare-save',()=>{if(pendingDrafts()&&!busy)action(flushDrafts)});await api.event.listen('symbio://changed',e=>accept(e.payload));await api.event.listen('symbio://layout',e=>applyLayout(e.payload));await api.event.listen('symbio://close-blocked',()=>status('unsaved_changes'));await api.event.listen('symbio://panel-error',e=>status(e.payload));await api.event.listen('symbio://dock-preview',e=>document.body.dataset.drop=e.payload?.target===view?e.payload.zone:'');bindDock();if(!view.startsWith('split'))current=await invoke('snapshot');applyLayout(await invoke('workspace_state'));render();refreshInspection();}catch(e){root.textContent=t(e.code||'error')};}
+ try{if(view==='surface'){document.body.classList.add('surface-body');surface=await invoke('surface_state');await api.event.listen('symbio://surface-axes',e=>{surfaceAxes=e.payload;renderSurfaceAxes(root.querySelector('.surface-stage'),surfaceAxes,surface)});await api.event.listen('symbio://surface',e=>{const previous=surface?.cell;surface=e.payload;if(previous!==surface.cell&&!busy)render();else updateSurface()})}await api.event.listen('symbio://prepare-save',()=>{if(pendingDrafts()&&!busy)action(flushDrafts)});await api.event.listen('symbio://changed',e=>accept(e.payload));await api.event.listen('symbio://layout',e=>applyLayout(e.payload));await api.event.listen('symbio://close-blocked',()=>status('unsaved_changes'));await api.event.listen('symbio://panel-error',e=>status(e.payload));await api.event.listen('symbio://dock-preview',e=>document.body.dataset.drop=e.payload?.target===view?e.payload.zone:'');bindDock();if(!view.startsWith('split'))current=await invoke('snapshot');applyLayout(await invoke('workspace_state'));render();refreshInspection();}catch(e){root.textContent=t(e.code||'error')};}
 start();

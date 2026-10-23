@@ -76,3 +76,11 @@ The reported 15:14 development build aborted during AppKit launch because floati
 ## Three-column default workspace
 
 The default and Reset workspace now use Objects / wide Notebook–3D tab group / Structure & history. Notebook is initially active. Older v1–v3 dock layouts add 3D as a Notebook tab; existing v4 custom layouts remain until reset. Native Japanese UI checks at 1280×800 confirmed the reset layout, central tab switching, native GPU rendering and cell-to-3D automatic tab activation. The desktop's 27 tests and Clippy passed; the development app was rebuilt and the requested default applied to the current workspace.
+
+## 3D axis rulers and independent domains
+
+- `cargo test -p symbio-desktop`: **35 passed**. New coverage checks independent numeric bounds, atomic rejection of invalid second-axis bounds, readable and distinct ticks across narrow / large-offset ranges, constant-height ticks, WebGPU perspective division / screen-y direction, and identical float32 camera serialization in view and label payloads.
+- `cargo clippy -p symbio-desktop --all-targets -- -D warnings`: passed. `node --test scripts/*.test.mjs`: **13 passed**. Frontend syntax checks and the unsigned development app build passed.
+- Native macOS / Metal, Japanese UI at 1280×800: all three axis names and numeric ticks rendered in the central 3D tab. Set x=[-2,2], y=[-1,3] for z=x²−y²: original z bounds updated to [-9,4], with different x/y ruler values. Pointer orbit moved the rulers and text with the surface.
+- A reversed y range was rejected while x/y bounds, height bounds and the retained mesh remained unchanged. The localized error appeared; applying valid bounds restored the normal status. Labels remained present across both error and normal UI rebuilds.
+- Text is screen-facing and overlap-filtered; some ticks / names are intentionally hidden when crowded or outside the viewport at extreme views. Axis text uses original values over normalized drawing coordinates. Camera/range settings remain session view state as documented. Native checks for this addition used Japanese; other OS backends and other locale layouts were not separately exercised.
