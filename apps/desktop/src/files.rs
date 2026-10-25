@@ -11,7 +11,7 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 pub struct Session {
     pub core: AppCore,
-    pub store: ProjectStore,
+    store: Option<ProjectStore>,
     generation: u64,
 }
 #[derive(Serialize, Clone)]
@@ -19,21 +19,24 @@ pub struct DocumentSnapshot {
     #[serde(flatten)]
     snapshot: symbio_core::Snapshot,
     generation: u64,
-    path: String,
+    path: Option<String>,
 }
 impl Session {
     pub fn new(core: AppCore, store: ProjectStore) -> Self {
         Self {
             core,
-            store,
+            store: Some(store),
             generation: 1,
         }
+    }
+    fn path(&self) -> Option<&Path> {
+        self.store.as_ref().map(ProjectStore::path)
     }
     pub fn snapshot(&self) -> DocumentSnapshot {
         DocumentSnapshot {
             snapshot: self.core.snapshot(),
             generation: self.generation,
-            path: self.store.path().to_string_lossy().into_owned(),
+            path: self.path().map(|p| p.to_string_lossy().into_owned()),
         }
     }
     pub fn check_generation(&self, generation: u64) -> Result<(), UiError> {
@@ -44,11 +47,19 @@ impl Session {
         }
     }
     pub fn save(&mut self) -> Result<(), UiError> {
-        self.store.save(self.core.project())?;
+        self.store
+            .as_mut()
+            .ok_or_else(|| error("save_as_required"))?
+            .save(self.core.project())?;
         self.core.mark_saved();
         Ok(())
     }
-    fn replace(&mut self, core: AppCore, store: ProjectStore) -> Result<(), UiError> {
+    fn load(path: &Path) -> Result<(AppCore, ProjectStore), UiError> {
+        let mut store = ProjectStore::open(path)?;
+        let project = store.load()?.ok_or_else(|| error("io_error"))?;
+        Ok((AppCore::new(project)?, store))
+    }
+    fn replace(&mut self, core: AppCore, store: Option<ProjectStore>) -> Result<(), UiError> {
         let next = self
             .generation
             .checked_add(1)
@@ -59,7 +70,7 @@ impl Session {
         Ok(())
     }
     fn save_as(&mut self, path: &Path) -> Result<(), UiError> {
-        if same_path(path, self.store.path()) {
+        if self.path().is_some_and(|current| same_path(path, current)) {
             return self.save();
         }
         let next = self
@@ -69,7 +80,7 @@ impl Session {
         let mut destination = ProjectStore::open(path)?;
         destination.save(self.core.project())?;
         // Publish the new location only after a successful atomic save.
-        self.store = destination;
+        self.store = Some(destination);
         self.generation = next;
         self.core.mark_saved();
         Ok(())
@@ -192,35 +203,22 @@ pub async fn save_as(
         let _guard = op.acquire()?;
         prepare(&app)?;
         let _freeze = Freeze::new(&app);
-        let path = {
-            let state = app.state::<Shared>();
-            let session = state.0.lock().map_err(|_| error("internal_error"))?;
-            session.check_generation(generation)?;
-            session.store.path().to_path_buf()
-        };
-        let mut dialog = app
-            .dialog()
-            .file()
-            .set_title(labels(&app)[1])
-            .add_filter("Symbio", &["symbio"])
-            .set_directory(path.parent().unwrap())
-            .set_file_name(path.file_name().unwrap().to_string_lossy());
-        if let Some(window) = app.get_window("main") {
-            dialog = dialog.set_parent(&window);
+        {
+            app.state::<Shared>()
+                .0
+                .lock()
+                .map_err(|_| error("internal_error"))?
+                .check_generation(generation)?;
         }
-        let Some(file) = dialog.blocking_save_file() else {
+        let Some(path) = pick_save_path(&app)? else {
             return Ok(None);
         };
-        let mut path = file.into_path().map_err(|_| error("io_error"))?;
-        if path.extension().is_none() {
-            path.set_extension("symbio");
-        }
         let state = app.state::<Shared>();
         let mut session = state.0.lock().map_err(|_| error("internal_error"))?;
         session.check_generation(generation)?;
         no_drafts(&app)?;
         session.save_as(&path)?;
-        remember(&app, session.store.path());
+        remember(&app, session.path().expect("saved document"));
         let out = session.snapshot();
         let _ = app.emit("symbio://changed", &out);
         Ok(Some(out))
@@ -244,14 +242,19 @@ pub async fn open_document(
             let state = app.state::<Shared>();
             let session = state.0.lock().map_err(|_| error("internal_error"))?;
             session.check_generation(generation)?;
-            session.store.path().to_path_buf()
+            session.path().map(Path::to_path_buf)
         };
         let mut dialog = app
             .dialog()
             .file()
             .set_title(labels(&app)[0])
             .add_filter("Symbio", &["symbio"])
-            .set_directory(path.parent().unwrap());
+            .set_directory(
+                path.as_deref()
+                    .and_then(Path::parent)
+                    .map(Path::to_path_buf)
+                    .unwrap_or(app.path().app_data_dir().map_err(|_| error("io_error"))?),
+            );
         if let Some(window) = app.get_window("main") {
             dialog = dialog.set_parent(&window);
         }
@@ -259,42 +262,17 @@ pub async fn open_document(
             return Ok(None);
         };
         let path = file.into_path().map_err(|_| error("io_error"))?;
-        if same_path(&path, &path_for(&app)?) {
+        if path_for(&app)?
+            .as_deref()
+            .is_some_and(|current| same_path(&path, current))
+        {
             return Ok(None);
         }
         // Load and validate first: a broken or locked target cannot disturb this session.
-        let mut store = ProjectStore::open(&path)?;
-        let project = store.load()?.ok_or_else(|| error("io_error"))?;
-        let core = AppCore::new(project)?;
-        let (dirty, revision) = {
-            let state = app.state::<Shared>();
-            let session = state.0.lock().map_err(|_| error("internal_error"))?;
-            session.check_generation(generation)?;
-            no_drafts(&app)?;
-            (session.core.dirty(), session.core.project().revision)
+        let (core, store) = Session::load(&path)?;
+        let Some((generation, revision)) = confirm_save(&app, generation)? else {
+            return Ok(None);
         };
-        if dirty {
-            let text = labels(&app);
-            let cancel = match app
-                .state::<super::workspace::Workspace>()
-                .snapshot()
-                .locale
-                .as_str()
-            {
-                "ja" => "キャンセル",
-                "zh-CN" => "取消",
-                _ => "Cancel",
-            };
-            let mut dialog = app.dialog().message(text[2]).title("Symbio").buttons(
-                MessageDialogButtons::OkCancelCustom(text[3].into(), cancel.into()),
-            );
-            if let Some(window) = app.get_window("main") {
-                dialog = dialog.parent(&window);
-            }
-            if !dialog.blocking_show() {
-                return Ok(None);
-            }
-        }
         let out = {
             let state = app.state::<Shared>();
             let mut session = state.0.lock().map_err(|_| error("internal_error"))?;
@@ -303,29 +281,170 @@ pub async fn open_document(
             if session.core.project().revision != revision {
                 return Err(error("revision_conflict"));
             }
-            if dirty {
-                session.save()?;
-            }
-            session.replace(core, store)?;
-            remember(&app, session.store.path());
+            session.replace(core, Some(store))?;
+            remember(&app, session.path().expect("saved document"));
             session.snapshot()
         };
         let _ = app.emit("symbio://changed", &out);
+        if let Some(window) = app.get_window("plot") {
+            let _ = window.hide();
+        }
         super::surface3d::document_changed(&app);
         Ok(Some(out))
     })
     .await
     .map_err(|_| error("internal_error"))?
 }
-fn path_for(app: &tauri::AppHandle) -> Result<PathBuf, UiError> {
+fn path_for(app: &tauri::AppHandle) -> Result<Option<PathBuf>, UiError> {
     Ok(app
         .state::<Shared>()
         .0
         .lock()
         .map_err(|_| error("internal_error"))?
-        .store
         .path()
-        .to_path_buf())
+        .map(Path::to_path_buf))
+}
+fn pick_save_path(app: &tauri::AppHandle) -> Result<Option<PathBuf>, UiError> {
+    let path = path_for(app)?;
+    let directory = path
+        .as_deref()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .unwrap_or(app.path().app_data_dir().map_err(|_| error("io_error"))?);
+    let mut dialog = app
+        .dialog()
+        .file()
+        .set_title(labels(app)[1])
+        .add_filter("Symbio", &["symbio"])
+        .set_directory(directory)
+        .set_file_name(
+            path.as_deref()
+                .and_then(Path::file_name)
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or("Untitled.symbio".into()),
+        );
+    if let Some(window) = app.get_window("main") {
+        dialog = dialog.set_parent(&window);
+    }
+    let Some(file) = dialog.blocking_save_file() else {
+        return Ok(None);
+    };
+    let mut path = file.into_path().map_err(|_| error("io_error"))?;
+    if path.extension().is_none() {
+        path.set_extension("symbio");
+    }
+    Ok(Some(path))
+}
+// Return a token checked again at publication, including after any Save As dialog.
+fn confirm_save(app: &tauri::AppHandle, generation: u64) -> Result<Option<(u64, u64)>, UiError> {
+    let (dirty, revision, untitled) = {
+        let state = app.state::<Shared>();
+        let session = state.0.lock().map_err(|_| error("internal_error"))?;
+        session.check_generation(generation)?;
+        no_drafts(app)?;
+        (
+            session.core.dirty(),
+            session.core.project().revision,
+            session.path().is_none(),
+        )
+    };
+    if !dirty {
+        return Ok(Some((generation, revision)));
+    }
+    let locale = app.state::<super::workspace::Workspace>().snapshot().locale;
+    let (message, save, cancel) = match locale.as_str() {
+        "ja" => (
+            "現在の文書を保存して続けますか？",
+            "保存して続ける",
+            "キャンセル",
+        ),
+        "zh-CN" => ("是否保存当前文档后继续？", "保存并继续", "取消"),
+        _ => (
+            "Save the current document before continuing?",
+            "Save and Continue",
+            "Cancel",
+        ),
+    };
+    let mut dialog = app.dialog().message(message).title("Symbio").buttons(
+        MessageDialogButtons::OkCancelCustom(save.into(), cancel.into()),
+    );
+    if let Some(window) = app.get_window("main") {
+        dialog = dialog.parent(&window);
+    }
+    if !dialog.blocking_show() {
+        return Ok(None);
+    }
+    let destination = if untitled {
+        let Some(path) = pick_save_path(app)? else {
+            return Ok(None);
+        };
+        Some(path)
+    } else {
+        None
+    };
+    let state = app.state::<Shared>();
+    let mut session = state.0.lock().map_err(|_| error("internal_error"))?;
+    session.check_generation(generation)?;
+    no_drafts(app)?;
+    if session.core.project().revision != revision {
+        return Err(error("revision_conflict"));
+    }
+    if let Some(path) = destination {
+        session.save_as(&path)?;
+        remember(app, session.path().unwrap());
+    } else {
+        session.save()?;
+    }
+    // Publish this save even if the following switch fails its final token check.
+    let _ = app.emit("symbio://changed", session.snapshot());
+    Ok(Some((session.generation, revision)))
+}
+#[tauri::command]
+pub async fn new_document(
+    webview: tauri::Webview,
+    generation: u64,
+) -> Result<Option<DocumentSnapshot>, UiError> {
+    authorize(&webview)?;
+    let app = webview.app_handle().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let operation = app.state::<FileOperation>();
+        let _guard = operation.acquire()?;
+        prepare(&app)?;
+        let _freeze = Freeze::new(&app);
+        let name = match app
+            .state::<super::workspace::Workspace>()
+            .snapshot()
+            .locale
+            .as_str()
+        {
+            "ja" => "名称未設定",
+            "zh-CN" => "未命名",
+            _ => "Untitled",
+        };
+        let core = AppCore::new(symbio_core::Project::empty(name)?)?;
+        let Some((generation, revision)) = confirm_save(&app, generation)? else {
+            return Ok(None);
+        };
+        let out = {
+            let state = app.state::<Shared>();
+            let mut session = state.0.lock().map_err(|_| error("internal_error"))?;
+            session.check_generation(generation)?;
+            no_drafts(&app)?;
+            if session.core.project().revision != revision {
+                return Err(error("revision_conflict"));
+            }
+            session.replace(core, None)?;
+            session.snapshot()
+        };
+        let _ = app.emit("symbio://changed", &out);
+        if let Some(window) = app.get_window("plot") {
+            let _ = window.hide();
+        }
+        super::surface3d::document_changed(&app);
+        Ok(Some(out))
+    })
+    .await
+    .map_err(|_| error("internal_error"))?
 }
 
 #[cfg(test)]
@@ -342,7 +461,7 @@ mod tests {
         s.core
             .apply(Request {
                 expected_revision: s.core.project().revision,
-                actor: "human".into(),
+                actor: symbio_core::model::Actor::Human,
                 command: Command::Rename { name: name.into() },
             })
             .unwrap();
@@ -351,7 +470,7 @@ mod tests {
     fn save_as_preserves_source_and_undo_then_saves_to_new_location() {
         let dir = tempfile::tempdir().unwrap();
         let mut s = session(dir.path());
-        let original = std::fs::read(s.store.path()).unwrap();
+        let original = std::fs::read(s.path().unwrap()).unwrap();
         rename(&mut s, "Changed");
         let path = dir.path().join("copy.symbio");
         s.save_as(&path).unwrap();
@@ -361,7 +480,7 @@ mod tests {
             std::fs::read(dir.path().join("original.symbio")).unwrap(),
             original
         );
-        assert_eq!(s.store.path(), path);
+        assert_eq!(s.path().unwrap(), path.canonicalize().unwrap());
         assert!(s.check_generation(1).is_err());
         assert!(s.check_generation(2).is_ok());
         rename(&mut s, "New destination");
@@ -385,7 +504,10 @@ mod tests {
         assert_eq!(s.save_as(&path).unwrap_err().code, "project_locked");
         assert!(s.core.dirty());
         assert_eq!(s.generation, 1);
-        assert_eq!(s.store.path(), dir.path().join("original.symbio"));
+        assert_eq!(
+            s.path().unwrap(),
+            dir.path().join("original.symbio").canonicalize().unwrap()
+        );
         assert_eq!(std::fs::read(path).unwrap(), before);
         assert!(s.save_as(&dir.path().join("missing/copy.symbio")).is_err());
     }
@@ -398,10 +520,10 @@ mod tests {
         assert!(!s.core.dirty());
         assert_eq!(s.generation, 1);
         rename(&mut s, "Keep unsaved");
-        std::fs::write(s.store.path(), b"external edit").unwrap();
+        std::fs::write(s.path().unwrap(), b"external edit").unwrap();
         assert_eq!(s.save().unwrap_err().code, "external_change");
         assert!(s.core.dirty());
-        assert_eq!(std::fs::read(s.store.path()).unwrap(), b"external edit");
+        assert_eq!(std::fs::read(s.path().unwrap()).unwrap(), b"external edit");
     }
     #[test]
     fn replacing_document_resets_undo_and_accepts_lower_revision() {
@@ -412,12 +534,84 @@ mod tests {
         let mut store = ProjectStore::open(&path).unwrap();
         store.save(&Project::new("Another").unwrap()).unwrap();
         let p = store.load().unwrap().unwrap();
-        s.replace(AppCore::new(p).unwrap(), store).unwrap();
+        s.replace(AppCore::new(p).unwrap(), Some(store)).unwrap();
         assert_eq!(s.core.project().name, "Another");
         assert_eq!(s.core.project().revision, 0);
         assert!(!s.core.snapshot().can_undo);
         assert!(s.check_generation(1).is_err());
         assert_eq!(s.snapshot().generation, 2);
+    }
+    #[test]
+    fn invalid_or_missing_open_target_preserves_current_document() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = session(dir.path());
+        rename(&mut s, "Unsaved original");
+        let before = serde_json::to_value(s.snapshot()).unwrap();
+        let bad = dir.path().join("bad.symbio");
+        std::fs::write(&bad, b"not a project").unwrap();
+        assert!(Session::load(&bad).is_err());
+        assert!(Session::load(&dir.path().join("missing.symbio")).is_err());
+        assert_eq!(serde_json::to_value(s.snapshot()).unwrap(), before);
+        assert_eq!(std::fs::read(bad).unwrap(), b"not a project");
+    }
+    #[test]
+    fn new_blank_document_has_no_samples_or_location_and_cannot_overwrite_original() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = session(dir.path());
+        let original = dir.path().join("original.symbio");
+        let bytes = std::fs::read(&original).unwrap();
+        s.replace(
+            AppCore::new(Project::empty("Untitled").unwrap()).unwrap(),
+            None,
+        )
+        .unwrap();
+        assert!(s.path().is_none());
+        assert!(s.snapshot().path.is_none());
+        assert!(s.core.project().graph.nodes.is_empty());
+        assert!(s.core.project().current().cells.is_empty());
+        assert!(s.core.project().current().assumptions.is_empty());
+        assert!(s.core.project().history.is_empty());
+        assert!(s.core.project().current().selected.is_none());
+        assert!(!s.core.snapshot().can_undo);
+        assert_eq!(s.save().unwrap_err().code, "save_as_required");
+        assert_eq!(std::fs::read(&original).unwrap(), bytes);
+        // The previous file's lock is released when the blank document replaces it.
+        assert!(ProjectStore::open(original).is_ok());
+        let destination = dir.path().join("blank.symbio");
+        s.save_as(&destination).unwrap();
+        drop(s);
+        let (restored, _) = Session::load(&destination).unwrap();
+        assert!(restored.project().current().cells.is_empty());
+        assert!(restored.project().graph.nodes.is_empty());
+    }
+    #[test]
+    fn first_equation_in_blank_document_calculates_and_survives_first_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = session(dir.path());
+        s.replace(
+            AppCore::new(Project::empty("Blank study").unwrap()).unwrap(),
+            None,
+        )
+        .unwrap();
+        s.core
+            .apply(Request {
+                expected_revision: 0,
+                actor: symbio_core::model::Actor::Human,
+                command: Command::DefineLatex {
+                    id: None,
+                    name: "f".into(),
+                    source: "2+3".into(),
+                },
+            })
+            .unwrap();
+        assert_eq!(s.core.project().current().cells[0].id, 1);
+        assert!(s.core.dirty());
+        let path = dir.path().join("first.symbio");
+        s.save_as(&path).unwrap();
+        assert!(!s.core.dirty());
+        drop(s);
+        let (core, _) = Session::load(&path).unwrap();
+        assert_eq!(core.snapshot().cells[0].result_text.as_deref(), Some("5"));
     }
     #[test]
     fn operation_guard_releases_on_error_and_prevents_overlapping_dialogs() {

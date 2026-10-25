@@ -266,6 +266,7 @@ fn main() {
             snapshot,
             edit,
             save,
+            files::new_document,
             files::open_document,
             files::save_as,
             inspect,

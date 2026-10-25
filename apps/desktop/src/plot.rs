@@ -51,9 +51,15 @@ fn point(bytes: &mut Vec<u8>, id: u32, position: [f32; 3], scale: [f32; 3], colo
     bytes.extend(record);
 }
 #[tauri::command]
-pub async fn show_plot(webview: tauri::Webview, id: u64) -> Result<(), super::UiError> {
+pub async fn show_plot(
+    webview: tauri::Webview,
+    id: u64,
+    generation: u64,
+) -> Result<(), super::UiError> {
     super::authorize(&webview)?;
     let app = webview.app_handle().clone();
+    let file_operation = app.state::<super::files::FileOperation>();
+    let _file_guard = file_operation.acquire()?;
     let plot = app.state::<Plot>();
     if plot.busy.swap(true, Ordering::AcqRel) {
         return Err(super::error("panel_busy"));
@@ -62,6 +68,7 @@ pub async fn show_plot(webview: tauri::Webview, id: u64) -> Result<(), super::Ui
     let (graph, root, name, assumptions) = {
         let state = app.state::<super::Shared>();
         let session = state.0.lock().map_err(|_| super::error("internal_error"))?;
+        session.check_generation(generation)?;
         let p = session.core.project();
         let c = p
             .current()

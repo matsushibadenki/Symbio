@@ -132,6 +132,31 @@ pub struct Project {
     pub history: Vec<Event>,
 }
 impl Project {
+    /// A research document without sample equations, assumptions or results.
+    pub fn empty(name: &str) -> Result<Self> {
+        let project = Self {
+            schema_version: 1,
+            id: uuid::Uuid::new_v4(),
+            name: name.into(),
+            revision: 0,
+            next_cell: 1,
+            graph: Graph::default(),
+            active: "main".into(),
+            history: vec![],
+            branches: BTreeMap::from([(
+                "main".into(),
+                Branch {
+                    name: "main".into(),
+                    parent: None,
+                    cells: vec![],
+                    assumptions: BTreeMap::new(),
+                    selected: None,
+                },
+            )]),
+        };
+        project.validate()?;
+        Ok(project)
+    }
     pub fn new(name: &str) -> Result<Self> {
         let mut graph = Graph::default();
         let root = parser::parse(&mut graph, "x^3 + 2*x^2 - 5*x")?;

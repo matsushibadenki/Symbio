@@ -38,6 +38,12 @@ The toolbar supports English, Japanese and Simplified Chinese. Expression mode r
 - The plot icon opens a separate wgpu window. Rust evaluates the expression at 1,024 points over `x ∈ [-5,5]`, retaining samples and rendering data in Rust/GPU memory. Only the variable `x` is supported. Undefined samples are omitted; error bounds and continuity are not certified.
 - The JSON icon displays the complete document for inspection and selection. Choose a document path through the CLI or startup arguments.
 
+Use the new-document icon immediately left of the folder icon, or **⌘/Ctrl+N**, to start an empty, untitled document without sample equations or assumptions. Its first Save opens a location picker; creating it never overwrites the previous file. Unsaved changes must be saved before switching; cancelling either confirmation or the location picker keeps the current document. Untitled documents are held in memory and are not restored after quitting.
+
+Use the folder icon or **⌘/Ctrl+O** to open a `.symbio` document. Use **⇧⌘/Ctrl+S** or the Save As icon to choose a new location. Subsequent saves use that location; Save As preserves document history and session Undo. The save-status tooltip shows the full active path. The next launch restores the last opened or saved-as document when it still exists; `--project` overrides this preference.
+
+Opening another document first validates and locks the target. If the current document has unsaved changes, choose **Save and Open** or **Cancel**. Invalid input drafts, invalid files, lock conflicts and save failures leave the active document available. Opening a different document resets session Undo; delayed edits and snapshots from previous documents are rejected. Currently one document is active at a time; simultaneously retained documents remain on the roadmap.
+
 Saving applies pending expression and note edits. Syntax errors cancel the save, and closing with unsaved changes is blocked. Apply pending edits before switching branches, undoing, redoing or deleting cells. Document Undo/Redo covers the most recent 32 operations in the current session.
 
 ## Math keyboard

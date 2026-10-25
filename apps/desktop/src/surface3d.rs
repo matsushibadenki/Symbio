@@ -387,7 +387,7 @@ pub fn refresh(app: &tauri::AppHandle) {
                 s.samples = 0;
                 s.omitted = 0;
                 s.heights = None;
-                s.status = code.into();
+                s.status = if view.cell.is_none() { "ready" } else { code }.into();
                 if let Some(gpu) = gpu.as_mut() {
                     gpu.upload(&[], &[]);
                 }
