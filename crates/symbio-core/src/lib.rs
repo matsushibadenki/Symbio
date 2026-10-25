@@ -1,6 +1,7 @@
 //! Symbio's UI-independent owner: all operations are revision-checked transactions.
 pub mod algebra;
 pub mod collection;
+pub mod comparison;
 pub mod dependencies;
 pub mod exchange;
 pub mod graph;

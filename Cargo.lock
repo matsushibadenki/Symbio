@@ -3352,6 +3352,7 @@ dependencies = [
 name = "symbio-cli"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "serde_json",
  "symbio-core",
 ]

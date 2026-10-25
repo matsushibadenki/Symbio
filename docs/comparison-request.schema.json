@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Symbio read-only JSONL branch comparison",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "method": {"const": "math.compare_branches"},
+    "base": {"type": "string", "minLength": 1, "maxLength": 64},
+    "target": {"type": "string", "minLength": 1, "maxLength": 64}
+  },
+  "required": ["method", "base", "target"]
+}

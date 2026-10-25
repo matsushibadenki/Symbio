@@ -10,7 +10,7 @@ import {bindDock,renderTabs,bindSplitter} from './dock.js';
 const api=window.__TAURI__;const view=new URLSearchParams(location.search).get('view')||'preview';
 const root=document.getElementById('app');let current=null,layout=null,busy=false,statusKey='ready',detail='',inspection=null,inspectionRevision=-1;
 let surface=null,surfaceAxes=null;
-let graphEditing=null;
+let graphEditing=null,comparisonTarget=null;
 const expandedEditors=new Set(),expandedSections=new Set();let revealCell=null;
 let dependencyZoom=view==='dependencies'?1.6:1;
 let keyboard=null;const notePreviews=new Set();
@@ -33,6 +33,42 @@ function showFormula(html){
  const size=el('input',{type:'range',min:22,max:72,value:44,'aria-label':t('formula_size'),oninput:e=>body.style.setProperty('--formula-size',e.target.value+'px')});
  const dialog=el('dialog',{class:'formula-dialog'},el('div',{class:'dialog-head'},el('strong',{text:t('formula_focus')}),size,button('close','close',()=>dialog.close())),body);
  dialog.addEventListener('close',()=>dialog.remove());document.body.append(dialog);dialog.showModal();
+}
+
+function showBranchComparison(){
+ if(view!=='comparison'){action(()=>invoke('show_comparison'));return;}
+ if(!api||current.branches.length<2){root.replaceChildren(el('p',{text:t('comparison_requires_branches')}));return;}
+ const baseline=current,body=el('div',{class:'comparison-body'});
+ const target=el('select',{'aria-label':t('comparison_target')},...current.branches.filter(b=>b!==current.active).map(b=>el('option',{value:b,text:b})));
+ if(current.branches.includes(comparisonTarget)&&comparisonTarget!==current.active)target.value=comparisonTarget;
+ const dialog=el('section',{class:'comparison-workspace'},el('div',{class:'dialog-head'},el('strong',{text:t('compare_branches')}),el('span',{text:baseline.active+' →'}),target,button('comparison_help','info',()=>{})),body);
+ let serial=0;
+ const side=(c)=>{
+  if(!c)return el('div',{class:'comparison-side quiet',text:'—'});
+  const box=el('div',{class:'comparison-side'},formula(c.mathml));for(const ref of box.querySelectorAll('[data-reference]')){ref.removeAttribute('role');ref.removeAttribute('tabindex');ref.removeAttribute('title');ref.removeAttribute('aria-label');}
+  if(c.calculation){const r=c.calculation,params=Object.entries({...r.bindings,...r.exact_bindings}).map(([k,v])=>k+' = '+v).join(', ');box.append(el('div',{class:'small',text:t(r.operation)+(r.variable&&['differentiate','integrate','solve'].includes(r.operation)?' · '+r.variable:'')+(params?' · '+params:'')}));}
+  if(c.output?.value!=null&&!c.result_mathml)box.append(el('div',{text:String(c.output.value)}));
+  if(c.result_mathml)box.append(el('div',{class:'small',text:t('result')}),formula(c.result_mathml));
+  if(c.output)box.append(el('div',{class:'small',text:t(c.output.trust)+' · '+t(c.output.precision)+' · '+c.output.engine}),...c.output.conditions.map(v=>el('div',{class:'small',text:conditionLabel(v)})));
+  if(c.calculation_error)box.append(el('div',{class:'calculation-error',text:t(c.calculation_error)}));
+  if(c.note)box.append(el('div',{class:'comparison-note',text:c.note}));
+  return box;
+ };
+ const assumption=(a)=>a?t(a.domain)+(a.nonzero?' · '+t('nonzero'):'')+(a.dimension?' · M '+a.dimension[0]+' L '+a.dimension[1]+' T '+a.dimension[2]:''):t('not_configured');
+ async function load(){const request=++serial;body.replaceChildren(el('p',{text:t('working')}));try{
+  const data=await invoke('compare_branches',{base:baseline.active,target:target.value,generation:baseline.generation,revision:baseline.revision});
+  if(request!==serial||!dialog.isConnected||current!==baseline)return;
+  const rows=[el('div',{class:'comparison-columns small'},el('strong',{text:data.base}),el('strong',{text:data.target}))];
+  for(const a of data.assumptions)rows.push(el('section',{class:'comparison-item'},el('strong',{text:a.symbol+' · '+t('assumptions')}),el('div',{class:'comparison-columns'},el('div',{text:assumption(a.base)}),el('div',{text:assumption(a.target)}))));
+  for(const c of data.cells){const item=el('section',{class:'comparison-item'},el('div',{class:'comparison-label'},el('strong',{text:(c.target?.name||c.base?.name)+' · '+t('comparison_'+c.status)}),el('span',{class:'small',text:c.fields.map(f=>t('difference_'+f)).join(' · ')})),el('div',{class:'comparison-columns'},side(c.base),side(c.target)));
+   if(c.fields.includes('resolved'))item.append(el('details',{},el('summary',{text:t('resolved_definition')}),el('div',{class:'comparison-columns'},c.base?formula(c.base.resolved_mathml):el('span',{text:'—'}),c.target?formula(c.target.resolved_mathml):el('span',{text:'—'}))));
+   if(c.fields.includes('source')){const source=c=>c?el('div',{},el('div',{class:'small',text:t(c.source_format==='latex'?'latex_preview':'expression_format')}),el('pre',{class:'comparison-source',text:c.source})):el('span',{text:'—'});item.append(el('details',{},el('summary',{text:t('source')}),el('div',{class:'comparison-columns'},source(c.base),source(c.target))));}
+   rows.push(item);
+  }
+  if(!data.cells.length&&!data.assumptions.length)rows.push(el('p',{text:t('no_branch_differences')}));
+  rows.push(el('div',{class:'small',text:t('unchanged_cells')+' · '+data.unchanged_cells+' · r'+data.revision}));body.replaceChildren(...rows);
+ }catch(e){if(request===serial&&dialog.isConnected)body.replaceChildren(el('p',{class:'calculation-error',text:t(e.code||'error')}));}}
+ target.addEventListener('change',()=>{comparisonTarget=target.value;load()});root.replaceChildren(dialog);load();
 }
 
 export async function invoke(name,args){if(current&&['set_draft','preview_latex','inspect','show_plot'].includes(name))args={...args,generation:current.generation};return api.core.invoke(name,args)}
@@ -68,7 +104,7 @@ function objects(){
  const symbols=[...new Set([...Object.keys(current.assumptions),...current.cells.flatMap(c=>c.parameters??c.symbols)])].sort();for(const symbol of symbols)out.append(assumptionForm(symbol,current.assumptions[symbol]??{domain:'unspecified',nonzero:false,dimension:null},!current.assumptions[symbol]));
  const symbol=field('symbol','',{placeholder:'x',maxlength:48});out.append(el('form',{class:'branch-row',onsubmit:e=>{e.preventDefault();action(()=>mutate({method:'math.assume',symbol:symbol.value,assumption:{domain:'unspecified',nonzero:false,dimension:null}}))}},symbol,button('add','add',()=>symbol.form.requestSubmit())));
  out.append(el('div',{class:'section-title'},el('h2',{text:t('branch')}),icon('branch')));
- const branches=el('select',{'aria-label':t('branch'),onchange:e=>action(()=>mutate({method:'math.checkout',name:e.target.value}))},...current.branches.map(b=>el('option',{value:b,text:b})));branches.value=current.active;out.append(el('div',{class:'branch-row'},branches));
+ const branches=el('select',{'aria-label':t('branch'),onchange:e=>action(()=>mutate({method:'math.checkout',name:e.target.value}))},...current.branches.map(b=>el('option',{value:b,text:b})));branches.value=current.active;out.append(el('div',{class:'branch-row'},branches,button('compare_branches','branch',showBranchComparison,current.branches.length<2||!api?{disabled:''}:{})));
  const branch=field('new_branch','',{placeholder:t('new_branch'),maxlength:64});out.append(el('form',{class:'branch-row',onsubmit:e=>{e.preventDefault();action(()=>mutate({method:'math.branch',name:branch.value}))}},branch,button('create_branch','branch',()=>branch.form.requestSubmit())));
  return out;
 }
@@ -231,7 +267,7 @@ function updateSurface(scope=root){
 function render(){if(!current&&!view.startsWith('split'))return;
  const focus=document.activeElement?.dataset.focus,selection=document.activeElement?.selectionStart,selectionEnd=document.activeElement?.selectionEnd;const scrolls=[...root.querySelectorAll('.content')].map(e=>e.scrollTop);
  if(view.startsWith('split')){const focused=document.activeElement?.classList.contains('splitter');root.replaceChildren(bindSplitter());if(focused)root.firstElementChild.focus();return}
- if(view==='toolbar')root.replaceChildren(toolbar());else if(view==='dependencies')root.replaceChildren(dependencyWindow());else if(view==='preview')root.replaceChildren(el('div',{class:'preview-shell'},toolbar(),el('div',{class:'preview-panels'},...['objects','notebook','inspector'].map(panel))));else root.replaceChildren(panel(view));
+ if(view==='comparison'){showBranchComparison();return;}if(view==='toolbar')root.replaceChildren(toolbar());else if(view==='dependencies')root.replaceChildren(dependencyWindow());else if(view==='preview')root.replaceChildren(el('div',{class:'preview-shell'},toolbar(),el('div',{class:'preview-panels'},...['objects','notebook','inspector'].map(panel))));else root.replaceChildren(panel(view));
  if(view==='surface')updateSurface();
  const dependencyDialog=document.querySelector('dialog.dependency-dialog');if(dependencyDialog)dependencyDialog.querySelector('.dependency-scroll').replaceWith(dependencyGraph());
  root.querySelectorAll('.content').forEach((e,i)=>e.scrollTop=scrolls[i]||0);
@@ -240,9 +276,9 @@ function render(){if(!current&&!view.startsWith('split'))return;
  if(!api||busy)root.querySelectorAll('button,input,select,textarea').forEach(e=>e.disabled=true);
 }
 async function showJson(){if(!api)return;await action(async()=>{const text=await invoke('export_document');const textarea=el('textarea',{'aria-label':t('json'),readonly:''});textarea.value=text;const dialog=el('dialog',{},el('div',{class:'dialog-head'},el('strong',{text:t('json')}),button('close','close',()=>dialog.close())),textarea,button('copy','json',()=>textarea.select()));dialog.addEventListener('close',()=>dialog.remove());document.body.append(dialog);dialog.showModal();});}
-root.addEventListener('click',e=>{const reference=e.target.closest?.('[data-reference]');if(reference){const cell=current.cells.find(c=>c.name===reference.dataset.reference);if(cell)action(()=>selectCell(cell.id));}});
+root.addEventListener('click',e=>{if(view==='comparison')return;const reference=e.target.closest?.('[data-reference]');if(reference){const cell=current.cells.find(c=>c.name===reference.dataset.reference);if(cell)action(()=>selectCell(cell.id));}});
 root.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.ctrlKey&&!e.metaKey&&e.target.matches?.('[data-reference]')){e.preventDefault();e.target.dispatchEvent(new MouseEvent('click',{bubbles:true}));}});
-document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&!e.shiftKey&&e.key.toLowerCase()==='n'){e.preventDefault();action(()=>fileAction('new_document'))} if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='o'){e.preventDefault();action(()=>fileAction('open_document'))} if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='s'){e.preventDefault();action(()=>fileAction(e.shiftKey?'save_as':'save'))}if((e.metaKey||e.ctrlKey)&&e.key==='z'&&!e.target.closest('input,textarea')){e.preventDefault();action(()=>mutate({method:e.shiftKey?'math.redo':'math.undo'}))}if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){const c=current.cells.find(c=>c.id===Number(e.target.closest('[data-cell]')?.dataset.cell));if(c){e.preventDefault();action(async()=>{await commit(c);await mutate({method:'math.transform',id:c.id,operation:'compute',variable:'x',bindings:{}})})}}});
+document.addEventListener('keydown',e=>{if(view==='comparison')return;if((e.metaKey||e.ctrlKey)&&!e.shiftKey&&e.key.toLowerCase()==='n'){e.preventDefault();action(()=>fileAction('new_document'))} if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='o'){e.preventDefault();action(()=>fileAction('open_document'))} if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='s'){e.preventDefault();action(()=>fileAction(e.shiftKey?'save_as':'save'))}if((e.metaKey||e.ctrlKey)&&e.key==='z'&&!e.target.closest('input,textarea')){e.preventDefault();action(()=>mutate({method:e.shiftKey?'math.redo':'math.undo'}))}if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){const c=current.cells.find(c=>c.id===Number(e.target.closest('[data-cell]')?.dataset.cell));if(c){e.preventDefault();action(async()=>{await commit(c);await mutate({method:'math.transform',id:c.id,operation:'compute',variable:'x',bindings:{}})})}}});
 async function start(){if(!api){try{current=await(await fetch('./preview.json')).json();setLocale('en');layout={revision:0,locale:'en',floating:[],floating_groups:[],root:{kind:'split',first:{kind:'tabs',panels:['objects'],active:'objects'},second:{kind:'split',first:{kind:'tabs',panels:['notebook'],active:'notebook'},second:{kind:'tabs',panels:['inspector'],active:'inspector'}}}};render()}catch{root.textContent=t('preview')}return}
  try{await api.event.listen('symbio://file-busy',e=>{root.inert=e.payload});if(view==='surface'){document.body.classList.add('surface-body');surface=await invoke('surface_state');await api.event.listen('symbio://surface-axes',e=>{surfaceAxes=e.payload;renderSurfaceAxes(root.querySelector('.surface-stage'),surfaceAxes,surface)});await api.event.listen('symbio://surface',e=>{const previous=surface?.cell;surface=e.payload;if(previous!==surface.cell&&!busy)render();else updateSurface()})}await api.event.listen('symbio://prepare-save',()=>{if(pendingDrafts()&&!busy)action(flushDrafts)});await api.event.listen('symbio://changed',e=>accept(e.payload));await api.event.listen('symbio://layout',e=>applyLayout(e.payload));await api.event.listen('symbio://close-blocked',()=>status('unsaved_changes'));await api.event.listen('symbio://panel-error',e=>status(e.payload));await api.event.listen('symbio://dock-preview',e=>document.body.dataset.drop=e.payload?.target===view?e.payload.zone:'');bindDock();if(!view.startsWith('split'))current=await invoke('snapshot');applyLayout(await invoke('workspace_state'));render();refreshInspection();}catch(e){root.textContent=t(e.code||'error')};}
 start();

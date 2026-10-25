@@ -116,3 +116,13 @@ Desktop-only commands `switch_document {generation,id}` and `close_document {gen
 `math.substitute` accepts a cell `id` and a nonempty `values` map of symbol names to exact rational literal strings, for example `{"method":"math.substitute","id":1,"values":{"x":"2"}}` (place the command in the normal revision/actor request envelope). It substitutes into the resolved source before simplification. Unspecified variables remain symbolic; assumption violations, singular values and dimensioned quantity substitutions fail atomically. Reduce calculus operators before substituting their bound/differentiation variable.
 
 Calculation recipes store optional `exact_bindings` separately from float64 `bindings` and replay on dependency changes. Cell snapshots and previews expose `parameters` and `dependent_symbol`; cell snapshots also contain `definition_mathml`. These are presentation metadata, not changes to algebraic free-variable semantics. See [Mathematical contract](mathematical-contract.md).
+
+## Read-only branch comparison
+
+In JSONL `serve`, send `{"method":"math.compare_branches","base":"main","target":"trial"}` outside the mutation envelope. The response contains `revision`, `base`, `target`, `cells`, `assumptions` and `unchanged_cells`. This request rejects unknown fields and missing branch names; it neither saves nor switches branches.
+
+Cells are matched by document cell ID. Each changed entry has `status` (`added`, `removed`, `changed`), `fields`, and nullable `base`/`target` views with typeset definitions, resolved expressions, result evidence, calculation recipes, source and notes. Assumption differences preserve absent versus explicitly configured values. The comparison is structural, not an algebraic equivalence check. Result evidence includes domain conditions, engine and precision; revision-only calculation timestamps are excluded. Node IDs remain document/revision-local.
+
+The desktop `compare_branches` read command additionally requires document generation and revision; stale requests are rejected. Its dedicated comparison WebView can read snapshots/layout and comparisons but is not authorized to edit the document or write files. The view refreshes when the document changes, including document switches. Unapplied drafts are intentionally excluded.
+
+The read request has its own [JSON Schema](comparison-request.schema.json); it is not a mutation request.

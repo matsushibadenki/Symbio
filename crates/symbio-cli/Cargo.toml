@@ -5,3 +5,4 @@ edition = "2024"
 [dependencies]
 symbio-core = { path = "../symbio-core" }
 serde_json.workspace = true
+serde.workspace = true

@@ -139,3 +139,26 @@ Screenshot: [research workspace](screenshots/research-workspace-ja.jpg).
 - Advanced physics acceptance suites, formal proof, arbitrary precision floats, interval arithmetic and publication-quality figure export remain unimplemented or untested.
 
 Final native reload confirmed the typeset exact result `z = 4-y^2`. The original saved research document was restored at revision 55 without modifying its mathematics. CLI and math-keyboard end-to-end smoke checks also passed.
+
+## Read-only branch comparison (2026-10-25)
+
+Target flow: Objects branch picker → comparison icon → choose another branch → inspect typeset differences without checkout or mutation.
+
+- Rust: **103 tests passed** (56 core, 47 desktop). Five new tests cover stable identity through rename/add/remove, changed reference dependencies, exact recipes, source notation, assumptions/evidence, notes, errors, collection/reload, reverse comparison and read-only state.
+- JavaScript: **17 tests passed**; frontend syntax checks passed. Clippy passed with warnings denied. The existing `block 0.1.6` future compatibility notice remains.
+- The comparison WebView has only read access to snapshots/layout/comparison and event listening. Generation/revision guards and superseded-response rejection prevent displaying old-document results.
+- Browser skill is not installed. Validation uses the native macOS app because child WebViews, Tauri IPC authorization and separate windows are the actual target; a static browser preview cannot exercise that flow. Native runtime console logs are not available through the UI automation surface.
+- Structural equality is not mathematical equivalence. Merge, historical replay, Windows/Linux and long-running multi-monitor behavior remain outside this change.
+
+Native QA completed on macOS, in the 1000×720 comparison window:
+
+| Check | Result |
+| --- | --- |
+| Window identity and meaningful content | Passed: `view=comparison`, localized title, typeset definitions/results. |
+| Comparison target interaction | Passed: main → nonnegative-model → main; differences and unchanged-cell count updated. |
+| Assumption-sensitive results | Passed: nonnegative `x` versus real `abs(x)` appeared alongside their recorded conditions. |
+| Read-only state | Passed: closing comparison retained active linear-model, saved state and revision 6. CLI also verified identical before/after snapshots and unchanged file bytes. |
+| Layout | Passed at 1000×720: two aligned columns, scrollable formulas/details, no visible overlap or error overlay. |
+| Runtime console | Not captured by native UI automation; syntax checks, IPC interaction and rendered content passed. |
+
+The first native pass found an always-disabled button caused by serializing `disabled=false` as an HTML boolean attribute. It was corrected to omit the attribute when enabled; the rebuilt app's button and comparison flow passed. The original research document was restored saved at revision 55. Screenshot evidence: `/private/tmp/symbio-branch-comparison-ja.jpg`. Live edits/document switches are protected in implementation; they were not separately exercised while the comparison window remained open. Narrower window sizes, other platforms and extended sessions remain untested.

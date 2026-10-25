@@ -45,6 +45,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         let response = (|| -> Result<serde_json::Value, Box<dyn std::error::Error>> {
             let v: serde_json::Value = serde_json::from_slice(&line)?;
             match v.get("method").and_then(|v| v.as_str()) {
+                Some("math.compare_branches") => {
+                    #[derive(serde::Deserialize)]
+                    #[serde(deny_unknown_fields)]
+                    struct Compare {
+                        method: String,
+                        base: String,
+                        target: String,
+                    }
+                    let request: Compare = serde_json::from_value(v)?;
+                    debug_assert_eq!(request.method, "math.compare_branches");
+                    Ok(serde_json::to_value(symbio_core::comparison::compare(
+                        core.project(),
+                        &request.base,
+                        &request.target,
+                    )?)?)
+                }
                 Some("math.inspect") => {
                     if let Some(id) = v.get("id").and_then(|v| v.as_u64()) {
                         Ok(core.inspect(id)?)

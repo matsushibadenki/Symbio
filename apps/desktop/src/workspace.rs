@@ -523,6 +523,9 @@ fn panel_authorize(view: &tauri::Webview, panel: Panel) -> Result<(), UiError> {
 }
 #[tauri::command]
 pub fn workspace_state(webview: tauri::Webview) -> Result<LayoutState, UiError> {
+    if webview.label() == "comparison" {
+        return Ok(webview.state::<Workspace>().snapshot());
+    }
     layout_authorize(&webview)?;
     resize(webview.app_handle());
     redraw(webview.app_handle());

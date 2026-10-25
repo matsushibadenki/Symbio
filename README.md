@@ -165,3 +165,11 @@ Serving `apps/desktop/ui` through a static server provides a **read-only** previ
 **Substitute** accepts exact literals such as `2`, `0.1` and `1/3`; blank fields remain symbolic. For `z = x^2-y^2`, entering only `x=2` produces `z = 4-y^2`. **Numeric** with `x=2,y=3` produces `z ≈ -5` without error guarantees. Saved recipes replay after dependency changes. Definitions and linked references are typeset, model inputs are separated from explicit outputs, and unconfigured parameters display an Unspecified domain.
 
 Read the [mathematical contract](docs/mathematical-contract.md) and [screenshot feedback review](docs/feedback-review.md). The runtime is the bounded Rust kernel; optional `python3 scripts/smoke-research-contract.py` compares six cases with locally installed SymPy, which is not a runtime dependency.
+
+## Compare research branches
+
+Use the branch comparison icon beside the branch picker to open a read-only comparison window. The active branch is the left side; choose another branch on the right. Cells are matched by their stable document identity, including renames. Added/removed cells, definitions, resolved references, source notation, calculation recipes, results and evidence, errors, notes and explicit assumptions are compared separately. Unchanged cells are counted.
+
+The window follows the active document and refreshes on applied edits. Unapplied drafts are excluded. Comparison does not check out a branch, alter Undo/Redo or save the document. Structural difference does not imply mathematical inequivalence; identical formulas with different recorded conditions remain visible as evidence changes. This release does not implement branch merging or full historical event replay.
+
+CLI clients can send `{"method":"math.compare_branches","base":"main","target":"trial"}` to the existing JSONL `serve` endpoint. Missing branches and unknown request fields fail. Run `python3 scripts/smoke-branch-comparison.py` for the bounded end-to-end check.

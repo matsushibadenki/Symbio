@@ -60,7 +60,9 @@ fn authorize(view: &tauri::Webview) -> Result<(), UiError> {
 }
 #[tauri::command]
 fn snapshot(webview: tauri::Webview, state: tauri::State<Shared>) -> Result<Snapshot, UiError> {
-    authorize(&webview)?;
+    if webview.label() != "comparison" {
+        authorize(&webview)?;
+    }
     Ok(state
         .0
         .lock()
@@ -89,6 +91,34 @@ fn show_dependencies(webview: tauri::Webview) -> Result<(), UiError> {
         .title(title)
         .inner_size(960., 700.)
         .min_inner_size(480., 400.)
+        .center()
+        .build()
+        .map_err(|_| error("panel_error"))?;
+    }
+    Ok(())
+}
+#[tauri::command]
+fn show_comparison(webview: tauri::Webview) -> Result<(), UiError> {
+    authorize(&webview)?;
+    let app = webview.app_handle();
+    if let Some(window) = app.get_webview_window("comparison") {
+        window.show().map_err(|_| error("panel_error"))?;
+        window.set_focus().map_err(|_| error("panel_error"))?;
+    } else {
+        let locale = app.state::<workspace::Workspace>().snapshot().locale;
+        let title = match locale.as_str() {
+            "ja" => "Symbio · 分岐の比較",
+            "zh-CN" => "Symbio · 比较分支",
+            _ => "Symbio · Compare branches",
+        };
+        tauri::WebviewWindowBuilder::new(
+            app,
+            "comparison",
+            tauri::WebviewUrl::App("index.html?view=comparison".into()),
+        )
+        .title(title)
+        .inner_size(1000., 720.)
+        .min_inner_size(640., 400.)
         .center()
         .build()
         .map_err(|_| error("panel_error"))?;
@@ -229,6 +259,29 @@ fn inspect(
     Ok(session.core.inspect(id)?)
 }
 #[tauri::command]
+fn compare_branches(
+    webview: tauri::Webview,
+    state: tauri::State<Shared>,
+    base: String,
+    target: String,
+    generation: u64,
+    revision: u64,
+) -> Result<symbio_core::comparison::BranchComparison, UiError> {
+    if webview.label() != "comparison" {
+        authorize(&webview)?;
+    }
+    let session = state.0.lock().map_err(|_| error("internal_error"))?;
+    session.check_generation(generation)?;
+    if session.core.project().revision != revision {
+        return Err(error("revision_conflict"));
+    }
+    Ok(symbio_core::comparison::compare(
+        session.core.project(),
+        &base,
+        &target,
+    )?)
+}
+#[tauri::command]
 fn export_document(
     webview: tauri::Webview,
     state: tauri::State<Shared>,
@@ -322,6 +375,7 @@ fn main() {
             reveal_notebook,
             preview_latex,
             show_dependencies,
+            show_comparison,
             convert_source,
             set_draft,
             snapshot,
@@ -333,6 +387,7 @@ fn main() {
             files::open_document,
             files::save_as,
             inspect,
+            compare_branches,
             export_document,
             plot::show_plot,
             surface3d::surface_state,
@@ -343,6 +398,9 @@ fn main() {
             workspace::panel_drag
         ])
         .on_window_event(|window, event| {
+            if window.label() == "comparison" {
+                return;
+            }
             if window.label() == "dependencies" {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event
                     && window
