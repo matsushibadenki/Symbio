@@ -1,9 +1,13 @@
 # Symbio · Symbolic Intelligence Workbench
 
+<details><summary>Earlier development screenshots</summary>
+
 <img src="docs/images/symbio-image.png">
 <img src="docs/images/symbio-image2.png">
 
-Symbio is an early mathematical workbench built with Tauri 2 and Rust. It keeps mathematical meaning, assumptions and research history together, with the same Rust kernel serving both the desktop UI and CLI. It reuses ThreeX's wgpu renderer and ATOM's native panel infrastructure.
+</details>
+
+Symbio is an early reproducible derivation and research notebook built with Tauri 2 and Rust. It keeps mathematical meaning, assumptions and research history together, with the same Rust kernel serving both the desktop UI and CLI. It reuses ThreeX's wgpu renderer and ATOM's native panel infrastructure.
 
 **The current release is a Semantic Expression Graph (SEG) MVP. Mathematica compatibility, advanced CAS algorithms, LLM integration and formal proof engines are not implemented.**
 
@@ -26,29 +30,39 @@ cargo run --locked -p symbio-desktop -- --project /absolute/path/study.symbio
 
 If the document does not exist, Symbio creates polynomial and `sqrt(x^2)` examples. Without a project argument, it uses `workspace.symbio` in Tauri's application data directory, normally `~/Library/Application Support/dev.symbio.workbench/` on macOS. Dock layouts are stored in `dock-layout.json` in the application configuration directory. Set `SYMBIO_LAYOUT_PATH` to isolate layout persistence during testing.
 
-The toolbar supports English, Japanese and Simplified Chinese. Expression mode requires explicit multiplication (`2*x`); LaTeX mode also accepts `2x` and previews formulas while editing. Use the checkmark to apply edits, operation buttons to compute, and **⌘S** to save. Windows and Linux builds have not been tested.
+The toolbar supports English, Japanese and Simplified Chinese. Expression mode requires explicit multiplication (`2*x`); LaTeX mode also accepts `2x` and previews formulas while editing. Select a cell from Objects or its numbered button to expose calculation controls. Use the pencil to edit source, the checkmark to apply edits, and **⌘S** to save. Windows and Linux builds have not been tested.
 
 ## Using the workspace
 
 - **Left:** Add and select expressions, configure variable domains, nonzero conditions and dimensions `[M,L,T]`. Branches let you edit expressions and assumptions independently.
-- **Center:** Edit source, view typeset formulas and results, and write research notes. Operations include simplification, differentiation, supported definite and indefinite integrals, matrix operations, equations up to degree two and float64 evaluation. **⌘Enter** computes the current expression. Enter numeric bindings as JSON, such as `{"x":2}`.
+- **Center:** Edit source, view typeset formulas and results, and write research notes. Operations include simplification, differentiation, supported definite and indefinite integrals, matrix operations, equations up to degree two and float64 evaluation. **⌘Enter** computes the current expression. Use per-variable fields for exact substitution or numeric evaluation. Symbolic evaluation does not implicitly consume those values.
 - **Right:** Inspect SEG nodes referenced by inputs and outputs, together with operation history. History records the human/AI actor, branch, revision and engine. Example results are also computed in Rust.
 - Drag panel tabs to join a tab group at the center, split along an edge, or float outside the workspace as a native window. The placement menu offers the same operations. Closing a floating window returns its panel to the dock.
 - Resize splitters by dragging or using arrow keys. Language, layout and window placement are persisted.
 - The plot icon opens a separate wgpu window. Rust evaluates the expression at 1,024 points over `x ∈ [-5,5]`, retaining samples and rendering data in Rust/GPU memory. Only the variable `x` is supported. Undefined samples are omitted; error bounds and continuity are not certified.
 - The JSON icon displays the complete document for inspection and selection. Choose a document path through the CLI or startup arguments.
 
-Use the new-document icon immediately left of the folder icon, or **⌘/Ctrl+N**, to start an empty, untitled document without sample equations or assumptions. Its first Save opens a location picker; creating it never overwrites the previous file. Unsaved changes must be saved before switching; cancelling either confirmation or the location picker keeps the current document. Untitled documents are held in memory and are not restored after quitting.
+Use the new-document icon immediately left of the folder icon, or **⌘/Ctrl+N**, to start an empty, untitled document without sample equations or assumptions. Its first Save opens a location picker; creating it never overwrites the previous file. New and Open retain existing documents, including their unsaved changes. Untitled documents are held in memory and are not restored after quitting.
 
 Use the folder icon or **⌘/Ctrl+O** to open a `.symbio` document. Use **⇧⌘/Ctrl+S** or the Save As icon to choose a new location. Subsequent saves use that location; Save As preserves document history and session Undo. The save-status tooltip shows the full active path. The next launch restores the last opened or saved-as document when it still exists; `--project` overrides this preference.
 
-Opening another document first validates and locks the target. If the current document has unsaved changes, choose **Save and Open** or **Cancel**. Invalid input drafts, invalid files, lock conflicts and save failures leave the active document available. Opening a different document resets session Undo; delayed edits and snapshots from previous documents are rejected. Currently one document is active at a time; simultaneously retained documents remain on the roadmap.
+The document picker beside the title keeps up to **16 documents** open in one session. Each retains its SEG, branches, results, unsaved changes, file lock and independent Undo/Redo stack in Rust. A filled circle marks edits; an empty circle marks an untitled document. New/Open activates another document without requiring the current one to be saved. Selecting an already-open file activates its existing document instead of loading a duplicate. Switches apply pending editor drafts first; invalid drafts block the switch.
+
+The × beside the picker closes the current document. Modified documents offer **Save and Continue** or **Cancel**; untitled documents also require a save location. Cancelling either dialog preserves the document. Closing the last document creates a fresh empty one. App window closure and the app's Quit menu are blocked while any open document has unsaved edits, including inactive documents. Save each modified document before quitting. Only the last saved document location is restored on launch; the open-document set and memory-only changes are not a recovery format.
+
+Opening a new file validates and locks it before adding it. Invalid files, lock conflicts and save failures leave open documents available. Delayed edits and snapshots from previous document generations are rejected. Layout and 3D camera/range settings remain shared session view state; selecting a document updates the graph and samples its selected cell.
 
 Saving applies pending expression and note edits. Syntax errors cancel the save, and closing with unsaved changes is blocked. Apply pending edits before switching branches, undoing, redoing or deleting cells. Document Undo/Redo covers the most recent 32 operations in the current session.
 
+## Reading and calculating
+
+The notebook prioritizes typeset definitions and labelled results. Source syntax stays behind each cell's pencil; new cells open their editor automatically. Only the selected cell exposes calculation controls. Selecting an object or a reference reveals its notebook cell. Applying source or running a successful operation returns to the reading view, while invalid drafts keep their editor and hide previous outputs.
+
+The derivative and integral controls follow the selected variable. Multivariable expressions use partial-derivative notation. **≈** opens individual numeric fields for the expression's free variables; enter every value and press Evaluate. No JSON is required, and the result retains its bindings, trust status and precision. The right inspector puts Uses / Used by relationships first, with the full graph, SEG internals and audit history available on demand. These are display changes; the Rust calculations and saved mathematical objects are unchanged.
+
 ## Math keyboard
 
-Open the keyboard icon below an expression. Templates can wrap selected source in fractions, powers, roots or absolute values and select the next argument. The keyboard includes numbers, operators, elementary functions, cursor movement, deletion and input-specific Undo/Redo. In LaTeX mode, the calculus and matrix tabs insert directly computable templates. Use **Tab / Shift+Tab** to move between `□` placeholders.
+Open the pencil on a cell to edit its source, then use the keyboard icon below the source field. Templates can wrap selected source in fractions, powers, roots or absolute values and select the next argument. The keyboard includes numbers, operators, elementary functions, cursor movement, deletion and input-specific Undo/Redo. In LaTeX mode, the calculus and matrix tabs insert directly computable templates. Use **Tab / Shift+Tab** to move between `□` placeholders.
 
 The research-note keyboard also preserves templates from the supplied `mathkeyboard.html` in its **Notation** tab, including fractions, integrals, limits, sums and sets. The computational palette contains supported syntax; unsupported reference notation produces an explicit error. Fill every `□` before computing.
 
@@ -145,3 +159,9 @@ node --test scripts/math-keyboard.test.mjs scripts/latex-preview.test.mjs script
 ```
 
 Serving `apps/desktop/ui` through a static server provides a **read-only** preview of sample data generated by Rust. The browser does not contain an alternative JavaScript calculation engine.
+
+## Research calculation contract
+
+**Substitute** accepts exact literals such as `2`, `0.1` and `1/3`; blank fields remain symbolic. For `z = x^2-y^2`, entering only `x=2` produces `z = 4-y^2`. **Numeric** with `x=2,y=3` produces `z ≈ -5` without error guarantees. Saved recipes replay after dependency changes. Definitions and linked references are typeset, model inputs are separated from explicit outputs, and unconfigured parameters display an Unspecified domain.
+
+Read the [mathematical contract](docs/mathematical-contract.md) and [screenshot feedback review](docs/feedback-review.md). The runtime is the bounded Rust kernel; optional `python3 scripts/smoke-research-contract.py` compares six cases with locally installed SymPy, which is not a runtime dependency.

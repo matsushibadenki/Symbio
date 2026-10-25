@@ -64,6 +64,8 @@ pub struct Calculation {
     pub variable: String,
     #[serde(default)]
     pub bindings: BTreeMap<String, f64>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub exact_bindings: BTreeMap<String, String>,
 }
 impl Default for Calculation {
     fn default() -> Self {
@@ -71,6 +73,7 @@ impl Default for Calculation {
             operation: "compute".into(),
             variable: "x".into(),
             bindings: BTreeMap::new(),
+            exact_bindings: BTreeMap::new(),
         }
     }
 }

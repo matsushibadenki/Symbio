@@ -185,6 +185,7 @@ pub fn validate_plan(plan: &Calculation) -> Result<()> {
             "integrate",
             "expand",
             "evaluate",
+            "substitute",
             "solve",
             "determinant",
             "inverse",
@@ -193,6 +194,14 @@ pub fn validate_plan(plan: &Calculation) -> Result<()> {
         .contains(&plan.operation.as_str())
     {
         return Err(Error::Invalid("calculation recipe".into()));
+    }
+    if plan.operation == "substitute" {
+        if !plan.bindings.is_empty() {
+            return Err(Error::Invalid("ambiguous substitution bindings".into()));
+        }
+        crate::substitution::validate(&plan.exact_bindings)?;
+    } else if !plan.exact_bindings.is_empty() {
+        return Err(Error::Invalid("unexpected exact bindings".into()));
     }
     Ok(())
 }
@@ -211,15 +220,20 @@ pub fn recalculate(p: &mut Project, seeds: BTreeSet<u64>) -> Result<()> {
         cell.output = None;
         cell.calculation_error = None;
         cell.calculation = Some(plan.clone());
-        if let Err(error) = crate::execute(
-            p,
-            &Command::Transform {
+        let command = if plan.operation == "substitute" {
+            Command::Substitute {
+                id,
+                values: plan.exact_bindings,
+            }
+        } else {
+            Command::Transform {
                 id,
                 operation: plan.operation,
                 variable: plan.variable,
                 bindings: plan.bindings,
-            },
-        ) {
+            }
+        };
+        if let Err(error) = crate::execute(p, &command) {
             if matches!(error, Error::Limit) {
                 return Err(error);
             }

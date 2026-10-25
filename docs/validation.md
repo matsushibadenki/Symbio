@@ -109,3 +109,33 @@ The default and Reset workspace now use Objects / wide Notebook–3D tab group /
 - Native Japanese UI at 1280×800: the new-document icon is immediately left of Open. Click it to get an untitled notebook with 0 SEG nodes, no cells, assumptions or history, and an Unsaved indicator. The 3D panel clears its previous samples and shows the empty-state prompt.
 - First Save opens a location picker; cancelling retains the untitled document. Add the first equation, then New → Save and Continue → cancel location selection: the equation and dirty document remain. Saving to a temporary `.symbio` file succeeds. The original workspace was reopened unchanged at revision 45 before the final blank-document visual check.
 - English/Japanese/Simplified Chinese strings are supplied. Native checks used Japanese/macOS; other OS and locale layouts were not separately exercised. Untitled documents are memory-only until first save.
+
+## Multiple retained documents · 2026-10-25
+
+- `cargo test -p symbio-core -p symbio-desktop --offline`: **89 passed** (42 core, 47 desktop). New coverage exercises inactive unsaved changes, independent Undo/Redo, retained file locks, duplicate-path lookup, file unlock on close, closing the last document, failed switch/close rollback, the 16-document bound and Save As protection for another retained file.
+- Clippy with warnings denied, frontend syntax checks, **17 JavaScript tests**, and the unsigned development bundle build passed. The existing `block 0.1.6` future-compatibility notice remains.
+- Native Japanese/macOS at 1280×800: keep the original workspace and two untitled documents open; add e1=x² to document 2; activate empty document 3 without saving; switch back to document 2 and recover its equation and enabled Undo. Undo clears only that document; Redo restores e1. The picker lists all three documents and marks modified / untitled state.
+- Native testing exposed that the predefined AppKit Quit menu bypassed Tauri's `ExitRequested` event. The replacement menu command now routes through `AppHandle::exit`. Repeating ⌘Q while empty document 3 is active and modified document 2 is inactive leaves the app running and displays the save-before-exit message. This validates the custom Quit menu, not forced OS termination.
+- Close modified document 2 → Cancel preserves its equation and document entry. Save it to a temporary file, close it, then close empty document 3: the original workspace remains at revision 45 with its calculations. A screenshot confirmed the compact title/picker/close control fits beside the existing toolbar actions.
+- The document set is retained only in memory; full session recovery and Save All remain future work. Camera/range/layout remain shared view settings. Other operating systems, other locale layouts and long-running 16-document workloads were not exercised natively.
+
+## Research reading flow and progressive controls · 2026-10-25
+
+- Reviewed the existing native workspace against definition → assumptions → operation → result → dependencies. The implemented decisions are documented in `ui-review.md` and the root `design.md`. No participant-based usability claim is made.
+- Saved cells now lead with typeset input/result; source editing opens on demand and for new cells. Native Japanese/macOS QA at 1280×800 verified y differentiation of x²−y² (displayed partial-derivative control), then explicit x=2, y=3 numeric fields → **−5**, with bindings and `float64 · no certified error bound` retained. No JSON entry is required.
+- Native source editing: enter incomplete `\\frac{` in an existing cell, observe the parser error and suppression of its previous output, then Discard → original reference expression and result **9** restore at the same revision. Successful operations return to the reading view.
+- Object selection from the 3D tab activates Notebook, reveals the selected cell and updates the inspector. Uses / Used by links navigate between related cells; an expanded dependency disclosure stays open across selection and inspection updates. SEG internals and audit history remain available in disclosures. A narrowly scoped `reveal_notebook` command preserves the existing docking authorization boundary.
+- Inspected the docked notebook at several narrow widths around 320–420 logical pixels, the normal wide central pane, and its 800-pixel floating window. Controls wrapped and results stayed readable. Exact 320/375/414/768 browser viewport certification was not performed: this is a native desktop application with child WebViews and a GPU surface, so native QA was used. Reset restored the default dock layout after these checks.
+- `cargo test -p symbio-core -p symbio-desktop --offline`: **89 passed**; Clippy with warnings denied passed; **17 JavaScript tests** passed; frontend syntax checks and the unsigned development bundle build passed. The existing `block 0.1.6` future-compatibility notice remains. Core mathematical algorithms and file formats were unchanged.
+- The original workspace's mathematical definitions/results were retained; navigation checks ended with b selected, saved at revision 55. Temporary mathematical experiments used a separate document. Native checks used Japanese/macOS; English and Simplified Chinese labels were supplied but their rendered layouts were not separately exercised.
+
+Screenshot: [research workspace](screenshots/research-workspace-ja.jpg).
+
+## Screenshot feedback adoption (2026-10-25)
+
+- Rust: **98 tests passed** (51 core, 47 desktop); Clippy with warnings denied and the development app build passed.
+- JavaScript: **17 tests passed**. Optional local SymPy 1.14.0 oracle: **6 bounded comparisons passed**. This does not establish broad CAS conformance.
+- Native macOS checks: partial exact substitution with x=2 and blank y; numeric x=2,y=3 retaining output z; Undo restores the exact recipe; save/reload retains it; explicit model roles and Unspecified y are visible. Source Apply works with empty hidden numeric fields after separating form validation.
+- Advanced physics acceptance suites, formal proof, arbitrary precision floats, interval arithmetic and publication-quality figure export remain unimplemented or untested.
+
+Final native reload confirmed the typeset exact result `z = 4-y^2`. The original saved research document was restored at revision 55 without modifying its mathematics. CLI and math-keyboard end-to-end smoke checks also passed.

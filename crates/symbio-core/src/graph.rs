@@ -285,6 +285,39 @@ impl Graph {
     pub fn text(&self, id: Id) -> String {
         self.format(id, false, 0).unwrap_or_else(|_| "…".into())
     }
+    /// Presentation roles for an explicit equation z = f(x,y). Algebraic symbols
+    /// remain unchanged; this only identifies the input controls for the model.
+    pub fn dependent_symbol(&self, id: Id) -> Option<String> {
+        if let Node::Equation(left, right) = self.nodes[id]
+            && let Node::Symbol(ref name) = self.nodes[left]
+            && !self.symbols(right).contains(name)
+        {
+            return Some(name.clone());
+        }
+        None
+    }
+    pub fn parameters(&self, id: Id) -> Vec<String> {
+        let mut symbols = self.symbols(id);
+        if let Some(name) = self.dependent_symbol(id) {
+            symbols.remove(&name);
+        }
+        symbols.into_iter().collect()
+    }
+    pub fn definition_mathml(&self, id: Id, name: &str) -> String {
+        if matches!(self.nodes[id], Node::Equation(..)) {
+            return self.mathml(id);
+        }
+        let name = name
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;");
+        let body = self
+            .pretty_math(id, 0, 0)
+            .unwrap_or_else(|_| "<mtext>…</mtext>".into());
+        format!(
+            "<math xmlns=\"http://www.w3.org/1998/Math/MathML\" display=\"block\"><mrow><mi>{name}</mi><mo>:=</mo>{body}</mrow></math>"
+        )
+    }
     pub fn mathml(&self, id: Id) -> String {
         format!(
             "<math xmlns=\"http://www.w3.org/1998/Math/MathML\" display=\"block\">{}</math>",
@@ -315,8 +348,33 @@ impl Graph {
             Node::Number(_) | Node::Symbol(_) | Node::Reference(_) | Node::Constant(_) => {
                 self.format(id, true, depth)?
             }
-            Node::Add(a, b) => format!("<mrow>{}<mo>+</mo>{}</mrow>", f(*a, 1)?, f(*b, 1)?),
-            Node::Sub(a, b) => format!("<mrow>{}<mo>−</mo>{}</mrow>", f(*a, 1)?, f(*b, 2)?),
+            Node::Add(a, b) => {
+                let negative = match self.nodes[*a] {
+                    Node::Sub(zero, body) if self.value(zero).is_some_and(|v| v.is_zero()) => {
+                        Some(body)
+                    }
+                    Node::Mul(sign, body)
+                        if self.value(sign) == Some(Rational::from_integer((-1).into())) =>
+                    {
+                        Some(body)
+                    }
+                    _ => None,
+                };
+                if let Some(body) = negative
+                    && self.value(*b).is_some_and(|v| v > Rational::zero())
+                {
+                    format!("<mrow>{}<mo>−</mo>{}</mrow>", f(*b, 1)?, f(body, 2)?)
+                } else {
+                    format!("<mrow>{}<mo>+</mo>{}</mrow>", f(*a, 1)?, f(*b, 1)?)
+                }
+            }
+            Node::Sub(a, b) => {
+                if self.value(*a).is_some_and(|v| v.is_zero()) {
+                    format!("<mrow><mo>−</mo>{}</mrow>", f(*b, 2)?)
+                } else {
+                    format!("<mrow>{}<mo>−</mo>{}</mrow>", f(*a, 1)?, f(*b, 2)?)
+                }
+            }
             Node::Mul(a, b) => {
                 let op = if self.value(*a).is_some()
                     && matches!(self.nodes[*b], Node::Symbol(_) | Node::Pow(..))
@@ -371,7 +429,7 @@ impl Graph {
         let result = match &self.nodes[id] {
             Node::Reference(s) => {
                 if math {
-                    format!("<mrow><mo>@</mo><mi mathvariant=\"normal\">{s}</mi></mrow>")
+                    format!("<mi class=\"cell-reference\" data-reference=\"{s}\">{s}</mi>")
                 } else {
                     format!("@{s}")
                 }
@@ -514,6 +572,7 @@ impl Graph {
             }
             let f = |id| go(g, id, depth + 1);
             Ok(match &g.nodes[id] {
+                Node::Symbol(name) => symbol_math(name),
                 Node::Matrix { cols, entries, .. } => {
                     let mut rows = String::new();
                     for row in entries.chunks(*cols) {
@@ -527,7 +586,16 @@ impl Graph {
                         "<mrow><mo>[</mo><mtable columnspacing=\"1em\" rowspacing=\"0.45em\">{rows}</mtable><mo>]</mo></mrow>"
                     )
                 }
-                Node::Equation(a, b) => format!("<mrow>{}<mo>=</mo>{}</mrow>", f(*a)?, f(*b)?),
+                Node::Equation(a, b) => format!(
+                    "<mrow>{}<mo>{}</mo>{}</mrow>",
+                    f(*a)?,
+                    if matches!(g.nodes[*a], Node::Symbol(_)) {
+                        "≈"
+                    } else {
+                        "="
+                    },
+                    f(*b)?
+                ),
                 Node::Solutions { variable, values } => format!(
                     "<mrow>{}<mo>∈</mo><mo>{{</mo>{}<mo>}}</mo></mrow>",
                     symbol_math(variable),

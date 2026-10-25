@@ -369,6 +369,39 @@
           "required": [
             "method"
           ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "method": {
+              "const": "math.substitute"
+            },
+            "id": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 18446744073709551615
+            },
+            "values": {
+              "type": "object",
+              "minProperties": 1,
+              "maxProperties": 64,
+              "propertyNames": {
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                "maxLength": 48
+              },
+              "additionalProperties": {
+                "type": "string",
+                "maxLength": 256,
+                "minLength": 1
+              }
+            }
+          },
+          "required": [
+            "method",
+            "id",
+            "values"
+          ]
         }
       ]
     }

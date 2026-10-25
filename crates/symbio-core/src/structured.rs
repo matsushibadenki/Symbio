@@ -730,6 +730,13 @@ pub fn numeric(
             }
         }
     }
+    if let Some(dependent) = g.dependent_symbol(id)
+        && !bindings.contains_key(&dependent)
+        && let Node::Equation(left, right) = g.nodes[id]
+    {
+        let right = go(g, right, bindings)?;
+        return Ok((Some(g.intern(Node::Equation(left, right))?), None));
+    }
     if matches!(
         g.nodes[id],
         Node::Matrix { .. } | Node::Equation(..) | Node::Solutions { .. }

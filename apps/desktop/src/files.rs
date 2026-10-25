@@ -13,6 +13,22 @@ pub struct Session {
     pub core: AppCore,
     store: Option<ProjectStore>,
     generation: u64,
+    active_document: u64,
+    next_document: u64,
+    retained: Vec<RetainedDocument>,
+}
+const MAX_DOCUMENTS: usize = 16;
+struct RetainedDocument {
+    id: u64,
+    core: AppCore,
+    store: Option<ProjectStore>,
+}
+#[derive(Serialize, Clone)]
+struct DocumentSummary {
+    id: u64,
+    name: String,
+    dirty: bool,
+    path: Option<String>,
 }
 #[derive(Serialize, Clone)]
 pub struct DocumentSnapshot {
@@ -20,6 +36,8 @@ pub struct DocumentSnapshot {
     snapshot: symbio_core::Snapshot,
     generation: u64,
     path: Option<String>,
+    active_document: u64,
+    documents: Vec<DocumentSummary>,
 }
 impl Session {
     pub fn new(core: AppCore, store: ProjectStore) -> Self {
@@ -27,16 +45,54 @@ impl Session {
             core,
             store: Some(store),
             generation: 1,
+            active_document: 1,
+            next_document: 2,
+            retained: vec![],
         }
     }
     fn path(&self) -> Option<&Path> {
         self.store.as_ref().map(ProjectStore::path)
+    }
+    fn documents(&self) -> Vec<DocumentSummary> {
+        let summary = |id, core: &AppCore, store: Option<&ProjectStore>| DocumentSummary {
+            id,
+            name: core.project().name.clone(),
+            dirty: core.dirty(),
+            path: store.map(|s| s.path().to_string_lossy().into_owned()),
+        };
+        let mut documents = vec![summary(
+            self.active_document,
+            &self.core,
+            self.store.as_ref(),
+        )];
+        documents.extend(
+            self.retained
+                .iter()
+                .map(|d| summary(d.id, &d.core, d.store.as_ref())),
+        );
+        documents.sort_by_key(|d| d.id);
+        documents
+    }
+    pub fn has_unsaved_changes(&self) -> bool {
+        self.core.dirty() || self.retained.iter().any(|d| d.core.dirty())
+    }
+    fn document_at(&self, path: &Path) -> Option<u64> {
+        self.documents()
+            .into_iter()
+            .find(|d| {
+                d.path
+                    .as_deref()
+                    .is_some_and(|p| same_path(path, Path::new(p)))
+            })
+            .map(|d| d.id)
     }
     pub fn snapshot(&self) -> DocumentSnapshot {
         DocumentSnapshot {
             snapshot: self.core.snapshot(),
             generation: self.generation,
             path: self.path().map(|p| p.to_string_lossy().into_owned()),
+            active_document: self.active_document,
+            documents: self.documents(),
         }
     }
     pub fn check_generation(&self, generation: u64) -> Result<(), UiError> {
@@ -59,13 +115,72 @@ impl Session {
         let project = store.load()?.ok_or_else(|| error("io_error"))?;
         Ok((AppCore::new(project)?, store))
     }
-    fn replace(&mut self, core: AppCore, store: Option<ProjectStore>) -> Result<(), UiError> {
+    fn add_document(&mut self, core: AppCore, store: Option<ProjectStore>) -> Result<(), UiError> {
+        if self.retained.len() + 1 >= MAX_DOCUMENTS {
+            return Err(error("document_limit"));
+        }
         let next = self
             .generation
             .checked_add(1)
             .ok_or_else(|| error("resource_limit"))?;
-        self.core = core;
-        self.store = store;
+        let next_id = self
+            .next_document
+            .checked_add(1)
+            .ok_or_else(|| error("resource_limit"))?;
+        self.retained.push(RetainedDocument {
+            id: self.active_document,
+            core: std::mem::replace(&mut self.core, core),
+            store: std::mem::replace(&mut self.store, store),
+        });
+        self.active_document = self.next_document;
+        self.next_document = next_id;
+        self.generation = next;
+        Ok(())
+    }
+    fn switch(&mut self, id: u64) -> Result<(), UiError> {
+        if id == self.active_document {
+            return Ok(());
+        }
+        let index = self
+            .retained
+            .iter()
+            .position(|d| d.id == id)
+            .ok_or_else(|| error("document_changed"))?;
+        let next = self
+            .generation
+            .checked_add(1)
+            .ok_or_else(|| error("resource_limit"))?;
+        let target = &mut self.retained[index];
+        std::mem::swap(&mut self.core, &mut target.core);
+        std::mem::swap(&mut self.store, &mut target.store);
+        std::mem::swap(&mut self.active_document, &mut target.id);
+        self.generation = next;
+        Ok(())
+    }
+    fn close_active(&mut self, blank_name: &str) -> Result<(), UiError> {
+        if self.core.dirty() {
+            return Err(error("unsaved_changes"));
+        }
+        let next = self
+            .generation
+            .checked_add(1)
+            .ok_or_else(|| error("resource_limit"))?;
+        let target = if self.retained.is_empty() {
+            let id = self.next_document;
+            let next_id = id.checked_add(1).ok_or_else(|| error("resource_limit"))?;
+            let core = AppCore::new(symbio_core::Project::empty(blank_name)?)?;
+            self.next_document = next_id;
+            RetainedDocument {
+                id,
+                core,
+                store: None,
+            }
+        } else {
+            self.retained.pop().unwrap()
+        };
+        self.core = target.core;
+        self.store = target.store;
+        self.active_document = target.id;
         self.generation = next;
         Ok(())
     }
@@ -262,26 +377,28 @@ pub async fn open_document(
             return Ok(None);
         };
         let path = file.into_path().map_err(|_| error("io_error"))?;
-        if path_for(&app)?
-            .as_deref()
-            .is_some_and(|current| same_path(&path, current))
-        {
-            return Ok(None);
-        }
-        // Load and validate first: a broken or locked target cannot disturb this session.
-        let (core, store) = Session::load(&path)?;
-        let Some((generation, revision)) = confirm_save(&app, generation)? else {
-            return Ok(None);
+        let existing = {
+            let state = app.state::<Shared>();
+            let session = state.0.lock().map_err(|_| error("internal_error"))?;
+            session.check_generation(generation)?;
+            session.document_at(&path)
+        };
+        // Validate and lock a new candidate before touching the open documents.
+        let candidate = if existing.is_none() {
+            Some(Session::load(&path)?)
+        } else {
+            None
         };
         let out = {
             let state = app.state::<Shared>();
             let mut session = state.0.lock().map_err(|_| error("internal_error"))?;
             session.check_generation(generation)?;
             no_drafts(&app)?;
-            if session.core.project().revision != revision {
-                return Err(error("revision_conflict"));
+            if let Some(id) = existing {
+                session.switch(id)?;
+            } else if let Some((core, store)) = candidate {
+                session.add_document(core, Some(store))?;
             }
-            session.replace(core, Some(store))?;
             remember(&app, session.path().expect("saved document"));
             session.snapshot()
         };
@@ -411,17 +528,88 @@ pub async fn new_document(
         let _guard = operation.acquire()?;
         prepare(&app)?;
         let _freeze = Freeze::new(&app);
-        let name = match app
-            .state::<super::workspace::Workspace>()
-            .snapshot()
-            .locale
-            .as_str()
-        {
-            "ja" => "名称未設定",
-            "zh-CN" => "未命名",
-            _ => "Untitled",
-        };
+        let name = blank_name(&app);
         let core = AppCore::new(symbio_core::Project::empty(name)?)?;
+        let out = {
+            let state = app.state::<Shared>();
+            let mut session = state.0.lock().map_err(|_| error("internal_error"))?;
+            session.check_generation(generation)?;
+            no_drafts(&app)?;
+            session.add_document(core, None)?;
+            session.snapshot()
+        };
+        let _ = app.emit("symbio://changed", &out);
+        if let Some(window) = app.get_window("plot") {
+            let _ = window.hide();
+        }
+        super::surface3d::document_changed(&app);
+        Ok(Some(out))
+    })
+    .await
+    .map_err(|_| error("internal_error"))?
+}
+
+fn blank_name(app: &tauri::AppHandle) -> &'static str {
+    match app
+        .state::<super::workspace::Workspace>()
+        .snapshot()
+        .locale
+        .as_str()
+    {
+        "ja" => "名称未設定",
+        "zh-CN" => "未命名",
+        _ => "Untitled",
+    }
+}
+fn publish_switch(app: &tauri::AppHandle, out: &DocumentSnapshot) {
+    let _ = app.emit("symbio://changed", out);
+    if let Some(window) = app.get_window("plot") {
+        let _ = window.hide();
+    }
+    super::surface3d::document_changed(app);
+}
+#[tauri::command]
+pub async fn switch_document(
+    webview: tauri::Webview,
+    generation: u64,
+    id: u64,
+) -> Result<DocumentSnapshot, UiError> {
+    authorize(&webview)?;
+    let app = webview.app_handle().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let operation = app.state::<FileOperation>();
+        let _guard = operation.acquire()?;
+        prepare(&app)?;
+        let _freeze = Freeze::new(&app);
+        let out = {
+            let state = app.state::<Shared>();
+            let mut session = state.0.lock().map_err(|_| error("internal_error"))?;
+            session.check_generation(generation)?;
+            no_drafts(&app)?;
+            session.switch(id)?;
+            if let Some(path) = session.path() {
+                remember(&app, path);
+            }
+            session.snapshot()
+        };
+        publish_switch(&app, &out);
+        Ok(out)
+    })
+    .await
+    .map_err(|_| error("internal_error"))?
+}
+#[tauri::command]
+pub async fn close_document(
+    webview: tauri::Webview,
+    generation: u64,
+) -> Result<Option<DocumentSnapshot>, UiError> {
+    authorize(&webview)?;
+    let app = webview.app_handle().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let operation = app.state::<FileOperation>();
+        let _guard = operation.acquire()?;
+        prepare(&app)?;
+        let _freeze = Freeze::new(&app);
         let Some((generation, revision)) = confirm_save(&app, generation)? else {
             return Ok(None);
         };
@@ -433,14 +621,13 @@ pub async fn new_document(
             if session.core.project().revision != revision {
                 return Err(error("revision_conflict"));
             }
-            session.replace(core, None)?;
+            session.close_active(blank_name(&app))?;
+            if let Some(path) = session.path() {
+                remember(&app, path);
+            }
             session.snapshot()
         };
-        let _ = app.emit("symbio://changed", &out);
-        if let Some(window) = app.get_window("plot") {
-            let _ = window.hide();
-        }
-        super::surface3d::document_changed(&app);
+        publish_switch(&app, &out);
         Ok(Some(out))
     })
     .await
@@ -526,7 +713,7 @@ mod tests {
         assert_eq!(std::fs::read(s.path().unwrap()).unwrap(), b"external edit");
     }
     #[test]
-    fn replacing_document_resets_undo_and_accepts_lower_revision() {
+    fn new_active_document_has_its_own_undo_and_accepts_lower_revision() {
         let dir = tempfile::tempdir().unwrap();
         let mut s = session(dir.path());
         rename(&mut s, "Old edit");
@@ -534,7 +721,8 @@ mod tests {
         let mut store = ProjectStore::open(&path).unwrap();
         store.save(&Project::new("Another").unwrap()).unwrap();
         let p = store.load().unwrap().unwrap();
-        s.replace(AppCore::new(p).unwrap(), Some(store)).unwrap();
+        s.add_document(AppCore::new(p).unwrap(), Some(store))
+            .unwrap();
         assert_eq!(s.core.project().name, "Another");
         assert_eq!(s.core.project().revision, 0);
         assert!(!s.core.snapshot().can_undo);
@@ -560,7 +748,7 @@ mod tests {
         let mut s = session(dir.path());
         let original = dir.path().join("original.symbio");
         let bytes = std::fs::read(&original).unwrap();
-        s.replace(
+        s.add_document(
             AppCore::new(Project::empty("Untitled").unwrap()).unwrap(),
             None,
         )
@@ -575,8 +763,9 @@ mod tests {
         assert!(!s.core.snapshot().can_undo);
         assert_eq!(s.save().unwrap_err().code, "save_as_required");
         assert_eq!(std::fs::read(&original).unwrap(), bytes);
-        // The previous file's lock is released when the blank document replaces it.
-        assert!(ProjectStore::open(original).is_ok());
+        // The original document stays open with its file lock.
+        assert!(ProjectStore::open(original).is_err());
+        assert_eq!(s.documents().len(), 2);
         let destination = dir.path().join("blank.symbio");
         s.save_as(&destination).unwrap();
         drop(s);
@@ -588,7 +777,7 @@ mod tests {
     fn first_equation_in_blank_document_calculates_and_survives_first_save() {
         let dir = tempfile::tempdir().unwrap();
         let mut s = session(dir.path());
-        s.replace(
+        s.add_document(
             AppCore::new(Project::empty("Blank study").unwrap()).unwrap(),
             None,
         )
@@ -612,6 +801,113 @@ mod tests {
         drop(s);
         let (core, _) = Session::load(&path).unwrap();
         assert_eq!(core.snapshot().cells[0].result_text.as_deref(), Some("5"));
+    }
+    #[test]
+    fn switching_preserves_unsaved_edits_independent_undo_and_file_locks() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = session(dir.path());
+        rename(&mut s, "Original unsaved");
+        s.add_document(
+            AppCore::new(Project::empty("Second").unwrap()).unwrap(),
+            None,
+        )
+        .unwrap();
+        assert!(s.has_unsaved_changes());
+        assert!(!s.core.dirty());
+        assert!(!s.core.snapshot().can_undo);
+        assert!(ProjectStore::open(dir.path().join("original.symbio")).is_err());
+        rename(&mut s, "Second unsaved");
+        let old_generation = s.generation;
+        s.switch(1).unwrap();
+        assert!(s.check_generation(old_generation).is_err());
+        assert_eq!(s.core.project().name, "Original unsaved");
+        assert!(s.core.snapshot().can_undo);
+        s.core
+            .apply(Request {
+                expected_revision: s.core.project().revision,
+                actor: symbio_core::model::Actor::Human,
+                command: Command::Undo,
+            })
+            .unwrap();
+        assert_eq!(s.core.project().name, "Original");
+        s.switch(2).unwrap();
+        assert_eq!(s.core.project().name, "Second unsaved");
+        assert!(s.core.snapshot().can_undo);
+        assert!(!s.core.snapshot().can_redo);
+        assert!(s.has_unsaved_changes());
+    }
+    #[test]
+    fn duplicate_paths_switch_existing_documents_and_closed_files_unlock() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = session(dir.path());
+        s.add_document(
+            AppCore::new(Project::empty("Second").unwrap()).unwrap(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            s.document_at(&dir.path().join("./original.symbio")),
+            Some(1)
+        );
+        s.switch(1).unwrap();
+        assert_eq!(s.documents().len(), 2);
+        s.close_active("Untitled").unwrap();
+        assert_eq!(s.core.project().name, "Second");
+        assert!(ProjectStore::open(dir.path().join("original.symbio")).is_ok());
+        assert_eq!(s.document_at(&dir.path().join("original.symbio")), None);
+        s.close_active("Untitled").unwrap();
+        assert_eq!(s.documents().len(), 1);
+        assert!(s.path().is_none());
+        assert!(s.core.project().current().cells.is_empty());
+    }
+    #[test]
+    fn failed_or_excessive_document_changes_do_not_destroy_open_work() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = session(dir.path());
+        rename(&mut s, "Keep me");
+        let before = serde_json::to_value(s.snapshot()).unwrap();
+        assert!(s.close_active("Untitled").is_err());
+        assert!(s.switch(999).is_err());
+        assert_eq!(serde_json::to_value(s.snapshot()).unwrap(), before);
+        for i in 1..MAX_DOCUMENTS {
+            s.add_document(
+                AppCore::new(Project::empty(&format!("Document {i}")).unwrap()).unwrap(),
+                None,
+            )
+            .unwrap();
+        }
+        let before = serde_json::to_value(s.snapshot()).unwrap();
+        assert_eq!(
+            s.add_document(
+                AppCore::new(Project::empty("Overflow").unwrap()).unwrap(),
+                None
+            )
+            .unwrap_err()
+            .code,
+            "document_limit"
+        );
+        assert_eq!(serde_json::to_value(s.snapshot()).unwrap(), before);
+        s.switch(1).unwrap();
+        assert_eq!(s.core.project().name, "Keep me");
+        assert!(s.has_unsaved_changes());
+    }
+    #[test]
+    fn save_as_cannot_overwrite_another_retained_document() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = session(dir.path());
+        let original = dir.path().join("original.symbio");
+        let bytes = std::fs::read(&original).unwrap();
+        s.add_document(
+            AppCore::new(Project::empty("Second").unwrap()).unwrap(),
+            None,
+        )
+        .unwrap();
+        rename(&mut s, "Second unsaved");
+        assert_eq!(s.save_as(&original).unwrap_err().code, "project_locked");
+        assert_eq!(std::fs::read(original).unwrap(), bytes);
+        assert!(s.path().is_none());
+        assert!(s.core.dirty());
+        assert_eq!(s.documents().len(), 2);
     }
     #[test]
     fn operation_guard_releases_on_error_and_prevents_overlapping_dialogs() {

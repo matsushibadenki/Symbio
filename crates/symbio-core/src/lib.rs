@@ -9,11 +9,12 @@ pub mod model;
 pub mod parser;
 mod storage;
 pub mod structured;
+pub mod substitution;
 pub use model::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 pub use storage::ProjectStore;
-pub const ENGINE: &str = "symbio-rust/0.4.0";
+pub const ENGINE: &str = "symbio-rust/0.5.0";
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("revision conflict")]
@@ -98,6 +99,11 @@ pub enum Command {
         #[serde(default)]
         bindings: BTreeMap<String, f64>,
     },
+    #[serde(rename = "math.substitute")]
+    Substitute {
+        id: u64,
+        values: BTreeMap<String, String>,
+    },
     #[serde(rename = "math.select")]
     Select { id: u64 },
     #[serde(rename = "math.remove")]
@@ -129,6 +135,9 @@ pub struct CellView {
     pub expression: String,
     pub kind: String,
     pub mathml: String,
+    pub definition_mathml: String,
+    pub parameters: Vec<String>,
+    pub dependent_symbol: Option<String>,
     pub result_text: Option<String>,
     pub result_mathml: Option<String>,
     pub symbols: Vec<String>,
@@ -197,7 +206,17 @@ impl AppCore {
                             operation,
                             variable,
                             bindings,
+                            ..Default::default()
                         }),
+                        Command::Substitute { id, values }
+                            if id == cell.id && output.operation == "substitute" =>
+                        {
+                            Some(Calculation {
+                                operation: "substitute".into(),
+                                exact_bindings: values,
+                                ..Default::default()
+                            })
+                        }
                         _ => None,
                     });
                 cell.calculation = recorded.or_else(|| {
@@ -257,6 +276,9 @@ impl AppCore {
                     kind: structured::kind(&p.graph, c.resolved_root.unwrap_or(c.root)).into(),
                     expression: p.graph.text(c.root),
                     mathml: p.graph.mathml(c.root),
+                    definition_mathml: p.graph.definition_mathml(c.root, &c.name),
+                    parameters: p.graph.parameters(c.resolved_root.unwrap_or(c.root)),
+                    dependent_symbol: p.graph.dependent_symbol(c.resolved_root.unwrap_or(c.root)),
                     result_text: c.output.as_ref().map(|o| {
                         o.root.map(|r| p.graph.text(r)).unwrap_or_else(|| {
                             o.value.map(|v| format!("{v:.12}")).unwrap_or_default()
@@ -387,6 +409,8 @@ impl AppCore {
         let resolved = dependencies::resolve(&mut graph, &branch, root)?;
         structured::shape(&graph, resolved)?;
         Ok(latex::Preview {
+            parameters: graph.parameters(resolved),
+            dependent_symbol: graph.dependent_symbol(resolved),
             expression: graph.text(root),
             mathml: graph.mathml(root),
             symbols: graph.symbols(resolved).into_iter().collect(),
@@ -673,7 +697,57 @@ fn execute(p: &mut Project, command: &Command) -> Result<()> {
                 operation: operation.clone(),
                 variable: variable.clone(),
                 bindings: bindings.clone(),
+                ..Default::default()
             });
+            p.current_mut().selected = Some(*id);
+        }
+        Command::Substitute { id, values } => {
+            dependencies::resolve_current(p)?;
+            let cell = p
+                .current()
+                .cells
+                .iter()
+                .find(|c| c.id == *id)
+                .ok_or_else(|| Error::Invalid("cell".into()))?;
+            let root = cell.resolved_root.unwrap_or(cell.root);
+            structured::shape(&p.graph, root)?;
+            algebra::dimension(&p.graph, root, &p.current().assumptions, 0)?;
+            let assumptions = p.current().assumptions.clone();
+            let result = substitution::apply(&mut p.graph, root, values, &assumptions)?;
+            let mut conditions: Vec<String> = assumptions
+                .iter()
+                .map(|(s, a)| {
+                    format!(
+                        "{s}: {:?}{}",
+                        a.domain,
+                        if a.nonzero { ", nonzero" } else { "" }
+                    )
+                })
+                .collect();
+            conditions.extend(values.iter().map(|(s, v)| format!("{s} = {v}")));
+            let revision = p.revision.checked_add(1).ok_or(Error::Limit)?;
+            let cell = p
+                .current_mut()
+                .cells
+                .iter_mut()
+                .find(|c| c.id == *id)
+                .unwrap();
+            cell.output = Some(Output {
+                root: Some(result),
+                value: None,
+                operation: "substitute".into(),
+                trust: Trust::Symbolic,
+                precision: "exact".into(),
+                conditions,
+                engine: ENGINE.into(),
+            });
+            cell.calculation = Some(Calculation {
+                operation: "substitute".into(),
+                exact_bindings: values.clone(),
+                ..Default::default()
+            });
+            cell.calculated_revision = Some(revision);
+            cell.calculation_error = None;
             p.current_mut().selected = Some(*id);
         }
         Command::Select { id } => {

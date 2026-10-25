@@ -76,3 +76,93 @@ html:has(.surface-body),body.surface-body,.surface-body #app,.surface-panel{back
 .dependency-editor-pane{overflow:auto;padding:12px;border-left:1px solid var(--color-line);background:var(--color-panel)}
 @media(max-width:700px){.dependency-window-content{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(180px,1fr) minmax(200px,1fr)}.dependency-editor-pane{border-left:0;border-top:1px solid var(--color-line)}}
 .graph-editor[data-draft=true] .input-render>.formula{opacity:1}
+
+.document-picker{display:flex;align-items:center;gap:4px;min-width:0;max-width:240px}.document-picker>svg{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1.5}.document-picker select{min-width:90px;max-width:175px;width:14vw;text-overflow:ellipsis}.document-picker button{flex:none}.toolbar .title-input{width:clamp(80px,13vw,180px)}.toolbar{overflow-x:auto;flex-wrap:nowrap}.toolbar>button,.toolbar>.brand{flex-shrink:0}
+
+/* Hallmark · pre-emit critique: P5 H5 E4 S5 R5 V4
+ * Research workspace: mathematics first, progressive controls, shared selection. */
+.notebook{padding:var(--space-sm) var(--space-lg) var(--space-xl)}
+.cell{padding:var(--space-sm) 0 var(--space-md);scroll-margin-block:var(--space-md)}
+.cell[data-selected=true]{border-bottom-color:var(--color-accent)}
+.cell>.cell-top{margin-bottom:0;min-height:28px}
+.cell-number{width:28px;min-height:26px;padding:var(--space-xs);font:11px var(--font-code);border:1px solid var(--color-line)}
+.cell-number[aria-pressed=true]{color:var(--color-paper);background:var(--color-accent);border-color:var(--color-accent)}
+.cell-name{width:clamp(80px,18vw,180px);min-height:26px;padding:0 var(--space-xs)}
+.notebook-cell-body{padding-left:0}
+.equation-row{display:grid;grid-template-columns:36px minmax(0,1fr);align-items:baseline;gap:var(--space-sm)}
+.equation-label{font-size:10px;color:var(--color-muted);white-space:nowrap;padding-top:var(--space-sm)}
+.authored-formula{margin:var(--space-xs) 0}
+.notebook-cell-body[data-editing=true]>.authored-formula{display:none}
+.notebook-cell-body[data-draft=true]>.authored-formula{display:none}
+.source-editor{border:1px solid var(--color-line);padding:var(--space-sm);margin:var(--space-sm) 0;background:var(--color-panel)}
+.source-editor .cell-source{min-height:48px}
+.source-editor .cell-top{flex-wrap:wrap;margin-block:var(--space-xs)}
+.source-editor .latex-preview{padding:0 var(--space-xs)}
+.input-form[data-draft=true] .input-render>.formula{opacity:1}
+.cell:not([data-selected=true]) .operation-bar,.cell:not([data-selected=true]) .numeric-settings{display:none}
+.operation-bar{margin:var(--space-xs) 0;align-items:center;gap:var(--space-xs)}
+.operation-bar button{font-size:15px;min-height:28px;min-width:30px;padding:var(--space-xs) 6px}
+.operation-bar label{font-size:10px;color:var(--color-muted);gap:var(--space-xs)}
+.operation-bar .variable{width:44px;padding:var(--space-xs);font:13px var(--font-code)}
+.operation-bar[data-kind=matrix] label{display:none}
+.numeric-settings{font-size:11px;color:var(--color-muted);margin:var(--space-xs) 0}
+.numeric-settings>summary{display:flex;align-items:center;gap:var(--space-xs);width:fit-content;cursor:pointer;list-style:none}
+.numeric-settings>summary:before,.inspector-disclosure>summary:before{content:'›';font-size:16px;line-height:1}
+.numeric-settings[open]>summary:before,.inspector-disclosure[open]>summary:before{content:'⌄'}
+.numeric-settings .eval-controls{border-left:1px solid var(--color-line);padding:var(--space-sm);margin-left:var(--space-xs)}
+.numeric-settings .eval-controls label{flex-wrap:wrap}
+.output{background:transparent;border-left:1px solid var(--color-line);padding:var(--space-xs) 0 var(--space-xs) var(--space-sm);margin:var(--space-sm) 0}
+.output-header{padding-left:44px;align-items:center;flex-wrap:wrap;gap:var(--space-xs);font-size:10px}
+.output-header .trust-badge{margin-left:auto}
+.output .equation-row .formula{min-width:0}
+.result-metadata{display:flex;gap:var(--space-sm);flex-wrap:wrap;margin:var(--space-xs) 0 0 44px}
+.result-metadata .conditions:empty{display:none}
+.cell-note{margin:var(--space-xs) 0 0 44px;font-size:11px}
+.cell-note[open]{margin-left:0}
+.cell-note summary{width:fit-content}
+.calculation-revision{display:none}
+.no-result{margin:var(--space-sm) 0 0 44px}
+.research-inspector .section-title{gap:var(--space-xs);margin-bottom:var(--space-sm)}
+.research-inspector .section-title h2{flex:1}
+.selection-heading{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-sm);margin-bottom:var(--space-sm)}
+.selection-heading strong{font:22px var(--font-math);overflow-wrap:anywhere}
+.relationship-row{display:grid;grid-template-columns:48px minmax(0,1fr);align-items:baseline;gap:var(--space-xs);margin:var(--space-xs) 0}
+.relationship-links{display:flex;flex-wrap:wrap;gap:var(--space-xs);min-width:0}
+.relationship-links .reference-chip{border:1px solid var(--color-line);background:var(--color-paper);font:13px var(--font-math);color:var(--color-accent);padding:2px 7px;min-height:25px;overflow-wrap:anywhere}
+.inspector-disclosure{border-top:1px solid var(--color-line);margin-top:var(--space-md);padding-top:var(--space-sm)}
+.inspector-disclosure>summary{display:flex;align-items:center;gap:var(--space-sm);cursor:pointer;list-style:none;font-size:11px;font-weight:550}
+.inspector-disclosure>summary>span{display:flex;align-items:center;gap:var(--space-sm);min-width:0}
+.inspector-disclosure[open]>summary{margin-bottom:var(--space-sm)}
+.inspector-disclosure .dependency-scroll{margin:0;max-height:260px;border-color:var(--color-line);background:var(--color-panel)}
+.dependency-edges path{stroke:var(--color-muted)}
+.dependency-edges path.active{stroke:var(--color-accent)}
+.dependency-cell{border-color:var(--color-line);background:var(--color-paper)}
+.dependency-cell[aria-pressed=true]{border-color:var(--color-accent);background:var(--color-selected)}
+.dependency-cell small{color:var(--color-muted)}
+.dependency-cell[data-error=true]{border-color:var(--color-error)}
+.research-inspector .history-list{margin-top:var(--space-sm)}
+.object-row .symbol{width:36px;overflow:hidden;text-overflow:ellipsis}
+.object-meta>span{font-size:10px;color:var(--color-muted)}
+.object-meta small{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;font-size:11px}
+@media(max-width:430px){.notebook{padding-inline:var(--space-md)}.equation-row{grid-template-columns:30px minmax(0,1fr);gap:var(--space-xs)}.output-header{padding-left:34px}.result-metadata,.cell-note,.no-result{margin-left:34px}.operation-bar{flex-wrap:wrap}.source-editor{padding:var(--space-xs)}.relationship-row{grid-template-columns:44px minmax(0,1fr)}}
+.notebook .equation-row .formula{padding:var(--space-xs) var(--space-lg) var(--space-xs) 0}
+.notebook .equation-row .math-scroll{padding:0}
+.notebook .equation-row math{font-size:var(--text-math);line-height:1.3}
+.notebook .output-header{line-height:1.3}
+.notebook .cell-dependencies{margin:var(--space-xs) 0;font-size:11px}
+.notebook .resolved-definition{margin:var(--space-xs) 0;font-size:11px}
+.numeric-inputs{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-sm);margin:var(--space-sm) 0}
+.numeric-binding{gap:var(--space-xs);max-width:100%}
+.numeric-binding>span{font:18px var(--font-math);overflow-wrap:anywhere}
+.numeric-binding>input{width:100px;max-width:100%;padding:var(--space-xs);font:12px var(--font-code)}
+.numeric-settings>button{font-size:12px;min-height:28px;margin-bottom:var(--space-xs)}
+.notebook .equation-row>.numeric{min-width:0;width:100%;padding:var(--space-xs) 0;font-family:var(--font-math);font-size:var(--text-math);text-align:center;white-space:nowrap;overflow-x:auto;overflow-wrap:normal;font-variant-numeric:tabular-nums}
+/* Semantic cell references keep their identity without code-only @ notation. */
+.cell-reference{text-decoration:underline;text-decoration-style:dotted;text-decoration-color:var(--color-accent);text-underline-offset:3px;cursor:pointer}
+.cell-reference:focus-visible{outline:2px solid var(--color-accent);outline-offset:3px}
+.object-formula{max-width:100%;overflow:hidden;pointer-events:none}
+.object-formula math{font:16px var(--font-math);margin:0;min-width:0;width:max-content;max-width:none;white-space:nowrap}
+.object-meta{flex:1;overflow:hidden}
+.numeric-settings:not([open]){display:none}
+.numeric-settings .small{display:block;max-width:48ch;margin-bottom:var(--space-sm)}
+.operation-bar .word{font:12px var(--font-ui)}

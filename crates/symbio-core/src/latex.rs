@@ -24,6 +24,8 @@ pub struct Preview {
     pub mathml: String,
     pub symbols: Vec<String>,
     pub kind: String,
+    pub parameters: Vec<String>,
+    pub dependent_symbol: Option<String>,
 }
 pub fn preview(source: &str) -> Result<Preview> {
     let mut graph = Graph::default();
@@ -32,6 +34,8 @@ pub fn preview(source: &str) -> Result<Preview> {
         crate::structured::shape(&graph, root)?;
     }
     Ok(Preview {
+        parameters: graph.parameters(root),
+        dependent_symbol: graph.dependent_symbol(root),
         kind: crate::structured::kind(&graph, root).into(),
         expression: graph.text(root),
         mathml: graph.mathml(root),

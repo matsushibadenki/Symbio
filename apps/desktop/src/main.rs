@@ -95,6 +95,33 @@ fn show_dependencies(webview: tauri::Webview) -> Result<(), UiError> {
     }
     Ok(())
 }
+/// Cross-panel navigation is intentionally limited to revealing the notebook.
+/// General dock mutations remain scoped to their owning panel.
+#[tauri::command]
+async fn reveal_notebook(
+    webview: tauri::Webview,
+    generation: u64,
+) -> Result<layout::LayoutState, UiError> {
+    authorize(&webview)?;
+    let app = webview.app_handle().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<Shared>()
+            .0
+            .lock()
+            .map_err(|_| error("internal_error"))?
+            .check_generation(generation)?;
+        let revision = app.state::<workspace::Workspace>().snapshot().revision;
+        workspace::execute(
+            &app,
+            layout::Command::Select {
+                panel: layout::Panel::Notebook,
+            },
+            revision,
+        )
+    })
+    .await
+    .map_err(|_| error("internal_error"))?
+}
 #[tauri::command]
 async fn preview_latex(
     webview: tauri::Webview,
@@ -219,6 +246,39 @@ fn export_document(
 }
 fn main() {
     let result = tauri::Builder::default()
+        .menu(|app| {
+            use tauri::menu::{Menu, MenuItem, MenuItemKind};
+            let menu = Menu::default(app)?;
+            // AppKit's predefined Quit calls terminate: directly, bypassing ExitRequested.
+            // Preserve the standard editing/window menus, but route Quit through AppHandle.
+            for entry in menu.items()? {
+                if let MenuItemKind::Submenu(submenu) = entry {
+                    for (position, item) in submenu.items()?.into_iter().enumerate() {
+                        if let MenuItemKind::Predefined(predefined) = item
+                            && predefined.text()?.starts_with("Quit")
+                        {
+                            submenu.remove(&predefined)?;
+                            submenu.insert(
+                                &MenuItem::with_id(
+                                    app,
+                                    "symbio-quit",
+                                    "Quit Symbio",
+                                    true,
+                                    Some("CmdOrCtrl+Q"),
+                                )?,
+                                position,
+                            )?;
+                        }
+                    }
+                }
+            }
+            Ok(menu)
+        })
+        .on_menu_event(|app, event| {
+            if event.id().as_ref() == "symbio-quit" {
+                app.exit(0);
+            }
+        })
         .plugin(tauri_plugin_dialog::init())
         .manage(files::FileOperation::default())
         .manage(plot::Plot::default())
@@ -259,6 +319,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            reveal_notebook,
             preview_latex,
             show_dependencies,
             convert_source,
@@ -266,6 +327,8 @@ fn main() {
             snapshot,
             edit,
             save,
+            files::switch_document,
+            files::close_document,
             files::new_document,
             files::open_document,
             files::save_as,
@@ -360,7 +423,7 @@ fn main() {
                     .0
                     .lock()
                     .map(|s| {
-                        s.core.dirty()
+                        s.has_unsaved_changes()
                             || !window
                                 .state::<Drafts>()
                                 .0
@@ -380,6 +443,29 @@ fn main() {
         .build(tauri::generate_context!());
     match result {
         Ok(app) => app.run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = &event {
+                let pending = app
+                    .state::<Shared>()
+                    .0
+                    .lock()
+                    .map(|s| {
+                        s.has_unsaved_changes()
+                            || !app
+                                .state::<Drafts>()
+                                .0
+                                .lock()
+                                .map(|d| d.is_empty())
+                                .unwrap_or(false)
+                    })
+                    .unwrap_or(true);
+                if pending
+                    || app.state::<files::FileOperation>().busy()
+                    || app.state::<workspace::Workspace>().busy()
+                {
+                    api.prevent_exit();
+                    let _ = app.emit("symbio://close-blocked", ());
+                }
+            }
             if matches!(event, tauri::RunEvent::Exit) {
                 app.state::<window_placement::Store>().save();
             }
