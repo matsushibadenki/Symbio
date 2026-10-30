@@ -173,3 +173,25 @@ Use the branch comparison icon beside the branch picker to open a read-only comp
 The window follows the active document and refreshes on applied edits. Unapplied drafts are excluded. Comparison does not check out a branch, alter Undo/Redo or save the document. Structural difference does not imply mathematical inequivalence; identical formulas with different recorded conditions remain visible as evidence changes. This release does not implement branch merging or full historical event replay.
 
 CLI clients can send `{"method":"math.compare_branches","base":"main","target":"trial"}` to the existing JSONL `serve` endpoint. Missing branches and unknown request fields fail. Run `python3 scripts/smoke-branch-comparison.py` for the bounded end-to-end check.
+
+## Reproduce a calculation
+
+Open **Structure & history → Reproduction** to export the active branch as `.symbio-repro.json` or open a package for fresh source-based replay. The package contains sources, assumptions, references, exact/numeric recipes and expected evidence. Reports distinguish matching results, matching errors, differences and missing recipes. Replay is read-only; export never overwrites an existing file or changes the document save location.
+
+```sh
+cargo run --locked -p symbio-cli -- export-reproduction study.symbio study.symbio-repro.json
+cargo run --locked -p symbio-cli -- verify-reproduction study.symbio-repro.json
+```
+
+Read the [reproduction contract](docs/reproduction.md). This is bounded current-branch replay, not formal proof or full historical event replay. Scalar floats are compared bit-for-bit, so cross-platform differences are reported rather than hidden.
+
+## MathJSON expression exchange
+
+**Structure & history → MathJSON** exports the selected definition with resolved references and explicit assumptions, or imports a supported exact MathJSON expression into a new untitled document. It supports basic arithmetic, exact integers/rationals, elementary functions, equations and rectangular matrices. Large integers remain exact. Unsupported constructs are rejected rather than converted to text.
+
+```sh
+cargo run --locked -p symbio-cli -- export-mathjson study.symbio expression.mathjson.json
+cargo run --locked -p symbio-cli -- import-mathjson expression.mathjson.json new-study.symbio
+```
+
+Existing files are never overwritten. See the [supported subset and context envelope](docs/mathjson.md), [model example](examples/mathjson-model.json) and [matrix example](examples/mathjson-matrix.json). OpenMath and full MathJSON compatibility are not implemented.

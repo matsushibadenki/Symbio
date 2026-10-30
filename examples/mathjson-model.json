@@ -1,0 +1,10 @@
+{
+  "format": "symbio.mathjson",
+  "version": 1,
+  "name": "model",
+  "expression": ["Equal", "z", ["Subtract", ["Power", "x", 2], ["Power", "y", 2]]],
+  "assumptions": {
+    "x": {"domain": "real", "nonzero": false, "dimension": null},
+    "y": {"domain": "real", "nonzero": false, "dimension": null}
+  }
+}

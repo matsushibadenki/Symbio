@@ -921,3 +921,220 @@ mod tests {
         assert!(op.acquire().is_ok());
     }
 }
+
+#[tauri::command]
+pub async fn export_reproduction(
+    webview: tauri::Webview,
+    generation: u64,
+    revision: u64,
+) -> Result<Option<String>, UiError> {
+    authorize(&webview)?;
+    let app = webview.app_handle().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let op = app.state::<FileOperation>();
+        let _guard = op.acquire()?;
+        prepare(&app)?;
+        let _freeze = Freeze::new(&app);
+        let package = {
+            let state = app.state::<Shared>();
+            let session = state.0.lock().map_err(|_| error("internal_error"))?;
+            session.check_generation(generation)?;
+            if session.core.project().revision != revision {
+                return Err(error("revision_conflict"));
+            }
+            symbio_core::reproduction::capture(session.core.project())?
+        };
+        let locale = app.state::<super::workspace::Workspace>().snapshot().locale;
+        let title = match locale.as_str() {
+            "ja" => "再現パッケージを書き出す",
+            "zh-CN" => "导出重现包",
+            _ => "Export reproduction package",
+        };
+        let Some(file) = app
+            .dialog()
+            .file()
+            .set_title(title)
+            .add_filter("Symbio reproduction", &["json"])
+            .set_file_name(format!(
+                "research-r{}.symbio-repro.json",
+                package.payload.revision
+            ))
+            .blocking_save_file()
+        else {
+            return Ok(None);
+        };
+        let path = file.into_path().map_err(|_| error("io_error"))?;
+        let state = app.state::<Shared>();
+        let session = state.0.lock().map_err(|_| error("internal_error"))?;
+        session.check_generation(generation)?;
+        if session.core.project().revision != revision {
+            return Err(error("revision_conflict"));
+        }
+        no_drafts(&app)?;
+        if path.exists() {
+            return Err(error("reproduction_exists"));
+        }
+        symbio_core::reproduction::write_new(&path, &package)?;
+        Ok(Some(path.to_string_lossy().into_owned()))
+    })
+    .await
+    .map_err(|_| error("internal_error"))?
+}
+#[tauri::command]
+pub async fn verify_reproduction(
+    webview: tauri::Webview,
+    generation: u64,
+) -> Result<Option<symbio_core::reproduction::Report>, UiError> {
+    authorize(&webview)?;
+    let app = webview.app_handle().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let op = app.state::<FileOperation>();
+        let _guard = op.acquire()?;
+        let _freeze = Freeze::new(&app);
+        app.state::<Shared>()
+            .0
+            .lock()
+            .map_err(|_| error("internal_error"))?
+            .check_generation(generation)?;
+        let locale = app.state::<super::workspace::Workspace>().snapshot().locale;
+        let title = match locale.as_str() {
+            "ja" => "再現パッケージを検証",
+            "zh-CN" => "验证重现包",
+            _ => "Verify reproduction package",
+        };
+        let Some(file) = app
+            .dialog()
+            .file()
+            .set_title(title)
+            .add_filter("Symbio reproduction", &["json"])
+            .blocking_pick_file()
+        else {
+            return Ok(None);
+        };
+        let path = file.into_path().map_err(|_| error("io_error"))?;
+        let report = symbio_core::reproduction::verify(&symbio_core::reproduction::read(path)?)?;
+        app.state::<Shared>()
+            .0
+            .lock()
+            .map_err(|_| error("internal_error"))?
+            .check_generation(generation)?;
+        Ok(Some(report))
+    })
+    .await
+    .map_err(|_| error("internal_error"))?
+}
+
+#[tauri::command]
+pub async fn export_mathjson(
+    webview: tauri::Webview,
+    generation: u64,
+    revision: u64,
+) -> Result<Option<String>, UiError> {
+    authorize(&webview)?;
+    let app = webview.app_handle().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let operation = app.state::<FileOperation>();
+        let _guard = operation.acquire()?;
+        prepare(&app)?;
+        let _freeze = Freeze::new(&app);
+        let exchange = {
+            let state = app.state::<Shared>();
+            let session = state.0.lock().map_err(|_| error("internal_error"))?;
+            session.check_generation(generation)?;
+            if session.core.project().revision != revision {
+                return Err(error("revision_conflict"));
+            }
+            let id = session
+                .core
+                .project()
+                .current()
+                .selected
+                .ok_or_else(|| error("invalid_project"))?;
+            symbio_core::mathjson::export(session.core.project(), id)?
+        };
+        let locale = app.state::<super::workspace::Workspace>().snapshot().locale;
+        let title = match locale.as_str() {
+            "ja" => "数式をMathJSONで書き出す",
+            "zh-CN" => "导出MathJSON表达式",
+            _ => "Export expression as MathJSON",
+        };
+        let Some(file) = app
+            .dialog()
+            .file()
+            .set_title(title)
+            .add_filter("MathJSON", &["json"])
+            .set_file_name(format!("{}.mathjson.json", exchange.name))
+            .blocking_save_file()
+        else {
+            return Ok(None);
+        };
+        let path = file.into_path().map_err(|_| error("io_error"))?;
+        let state = app.state::<Shared>();
+        let session = state.0.lock().map_err(|_| error("internal_error"))?;
+        session.check_generation(generation)?;
+        no_drafts(&app)?;
+        if session.core.project().revision != revision {
+            return Err(error("revision_conflict"));
+        }
+        if path.exists() {
+            return Err(error("reproduction_exists"));
+        }
+        symbio_core::mathjson::write_new(&path, &exchange)?;
+        Ok(Some(path.to_string_lossy().into_owned()))
+    })
+    .await
+    .map_err(|_| error("internal_error"))?
+}
+#[tauri::command]
+pub async fn import_mathjson(
+    webview: tauri::Webview,
+    generation: u64,
+) -> Result<Option<DocumentSnapshot>, UiError> {
+    authorize(&webview)?;
+    let app = webview.app_handle().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let operation = app.state::<FileOperation>();
+        let _guard = operation.acquire()?;
+        prepare(&app)?;
+        let _freeze = Freeze::new(&app);
+        app.state::<Shared>()
+            .0
+            .lock()
+            .map_err(|_| error("internal_error"))?
+            .check_generation(generation)?;
+        let locale = app.state::<super::workspace::Workspace>().snapshot().locale;
+        let title = match locale.as_str() {
+            "ja" => "MathJSONを新しい文書に読み込む",
+            "zh-CN" => "导入MathJSON到新文档",
+            _ => "Import MathJSON into a new document",
+        };
+        let Some(file) = app
+            .dialog()
+            .file()
+            .set_title(title)
+            .add_filter("MathJSON", &["json"])
+            .blocking_pick_file()
+        else {
+            return Ok(None);
+        };
+        let core = symbio_core::mathjson::import(&symbio_core::mathjson::read(
+            file.into_path().map_err(|_| error("io_error"))?,
+        )?)?;
+        let out = {
+            let state = app.state::<Shared>();
+            let mut session = state.0.lock().map_err(|_| error("internal_error"))?;
+            session.check_generation(generation)?;
+            no_drafts(&app)?;
+            session.add_document(core, None)?;
+            session.snapshot()
+        };
+        let _ = app.emit("symbio://changed", &out);
+        if let Some(window) = app.get_window("plot") {
+            let _ = window.hide();
+        }
+        super::surface3d::document_changed(&app);
+        Ok(Some(out))
+    })
+    .await
+    .map_err(|_| error("internal_error"))?
+}

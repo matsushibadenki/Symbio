@@ -10,7 +10,7 @@ import {bindDock,renderTabs,bindSplitter} from './dock.js';
 const api=window.__TAURI__;const view=new URLSearchParams(location.search).get('view')||'preview';
 const root=document.getElementById('app');let current=null,layout=null,busy=false,statusKey='ready',detail='',inspection=null,inspectionRevision=-1;
 let surface=null,surfaceAxes=null;
-let graphEditing=null,comparisonTarget=null;
+let graphEditing=null,comparisonTarget=null,reproductionReport=null,reproductionPath=null,mathjsonPath=null;
 const expandedEditors=new Set(),expandedSections=new Set();let revealCell=null;
 let dependencyZoom=view==='dependencies'?1.6:1;
 let keyboard=null;const notePreviews=new Set();
@@ -77,7 +77,7 @@ function status(key,errorDetail=''){statusKey=key;detail=errorDetail;document.qu
 export async function action(fn){if(busy||!api)return;busy=true;document.querySelectorAll('button').forEach(b=>b.disabled=true);status('working');try{await draftQueue;await fn();status('ready')}catch(e){status(e.code||'error',e.detail||e.message||'');if(['revision_conflict','document_changed'].includes(e.code))accept(await invoke('snapshot'));if(['layout_conflict','panel_error','layout_save_failed'].includes(e.code))applyLayout(await invoke('workspace_state'));}finally{busy=false;render();}}
 async function mutate(command){const s=await invoke('edit',{generation:current.generation,request:{expected_revision:current.revision,actor:'human',command}});accept(s);return s}
 export function dockCommand(command){return action(async()=>applyLayout(await invoke('workspace_command',{command,expectedRevision:layout.revision})))}
-function accept(s){const decision=compareDocumentSnapshot(current,s);if(decision==='ignore')return;if(current&&decision!=='replace'&&current.active===s.active&&s.cells.length>current.cells.length&&!current.cells.some(c=>c.id===s.selected))expandedEditors.add(`${s.active_document??s.project_id}:${s.active}:editor-${s.selected}`);if(current?.selected!==s.selected||decision==='replace')revealCell=s.selected;if(decision==='replace'){drafts.clear();notePreviews.clear();expandedEditors.clear();graphEditing=null;keyboard=null;inspection=null;inspectionRevision=-1;document.querySelectorAll('dialog').forEach(d=>d.close());}current=s;if(statusKey==='unsaved_changes'&&!s.dirty&&!pendingDrafts()){statusKey='ready';detail=''}if(!busy)render();refreshInspection();}
+function accept(s){const decision=compareDocumentSnapshot(current,s);if(decision==='ignore')return;if(current&&decision!=='replace'&&current.active===s.active&&s.cells.length>current.cells.length&&!current.cells.some(c=>c.id===s.selected))expandedEditors.add(`${s.active_document??s.project_id}:${s.active}:editor-${s.selected}`);if(current?.selected!==s.selected||decision==='replace')revealCell=s.selected;if(decision==='replace'){reproductionReport=null;reproductionPath=null;mathjsonPath=null;drafts.clear();notePreviews.clear();expandedEditors.clear();graphEditing=null;keyboard=null;inspection=null;inspectionRevision=-1;document.querySelectorAll('dialog').forEach(d=>d.close());}current=s;if(statusKey==='unsaved_changes'&&!s.dirty&&!pendingDrafts()){statusKey='ready';detail=''}if(!busy)render();refreshInspection();}
 async function fileAction(command){await flushDrafts();if(command==='save'&&!current.path)command='save_as';const s=await invoke(command,{generation:current.generation});if(s)accept(s);}
 
 export function applyLayout(s){if(layout&&s.revision<=layout.revision)return;layout=s;setLocale(s.locale);if(view==='notebook')revealCell=current?.selected;if(!busy)render();}
@@ -218,6 +218,24 @@ function dependencyWindow(){
  return el('section',{class:'panel dependency-window'},el('div',{class:'panel-header'},el('strong',{text:t('dependency_graph')}),el('span',{class:'spacer'}),zoom,button('save','save',()=>action(()=>fileAction('save'))),compactButton(),button('recalculate','reset',()=>action(()=>mutate({method:'math.recalculate',id:null})))),el('div',{class:'content dependency-window-content'},el('div',{class:'dependency-diagram'},dependencyGraph()),el('div',{class:'dependency-editor-pane'},graphEditor(current.cells.find(c=>c.id===current.selected)))),footer());
 }
 
+function reproductionPanel(){
+ const controls=el('div',{class:'reproduction-tools'},button('export_reproduction','package',()=>action(async()=>{await flushDrafts();const path=await invoke('export_reproduction',{generation:current.generation,revision:current.revision});if(path)reproductionPath=path;})),button('verify_reproduction','replay',()=>action(async()=>{const generation=current.generation;const report=await invoke('verify_reproduction',{generation});if(report&&current.generation===generation)reproductionReport=report;})),button('reproduction_help','info',()=>{}));
+ const out=el('div',{class:'reproduction-panel'},controls);
+ if(reproductionPath)out.append(el('div',{class:'small reproduction-path',title:reproductionPath,text:t('reproduction_exported')+' · '+reproductionPath}));
+ const r=reproductionReport;if(!r)return out;
+ out.append(el('strong',{text:t(r.reproduced?'reproduction_matched':'reproduction_incomplete')}),el('div',{class:'small',text:r.document+' · '+r.branch+' · r'+r.revision}),el('div',{class:'small',text:t('repro_matched')+' '+r.matched+' · '+t('repro_error_reproduced')+' '+r.errors_reproduced+' · '+t('repro_mismatch')+' '+r.mismatched+' · '+t('repro_skipped')+' '+r.skipped}));
+ if(!r.engine_matches)out.append(el('div',{class:'calculation-error',text:t('repro_engine_mismatch')+' · '+r.recorded_engine+' → '+r.current_engine}));
+ for(const c of r.cells){const row=el('details',{class:'reproduction-cell'},el('summary',{text:c.name+' · '+t('repro_'+c.status)}));
+  if(c.differences.length)row.append(el('div',{class:'small',text:c.differences.map(f=>t('repro_difference_'+f)).join(' · ')}));
+  if(c.differences.includes('engine'))row.append(el('div',{class:'small',text:(c.expected.output?.engine||'—')+' → '+(c.actual?.output?.engine||'—')}));
+  if(c.actual?.error)row.append(el('div',{class:'calculation-error',text:t(c.actual.error)}));
+  if(c.result_mathml)row.append(formula(c.result_mathml));else if(c.result_text!=null)row.append(el('div',{class:'numeric',text:c.result_text}));
+  if(c.result_preview_omitted)row.append(el('div',{class:'small',text:t('repro_preview_omitted')}));
+  if(c.actual?.output)row.append(el('div',{class:'small',text:t(c.actual.output.trust)+' · '+c.actual.output.engine}));
+  out.append(row);
+ }
+ out.append(el('div',{class:'small reproduction-checksum',title:r.package_sha256,text:'SHA-256 · '+r.package_sha256}));return out;
+}
 function inspector(){
  const selected=current.cells.find(c=>c.id===current.selected),out=el('div',{class:'content side-content research-inspector'});
  const links=(key,ids)=>{const row=el('div',{class:'relationship-row'},el('span',{class:'small',text:t(key)}),el('div',{class:'relationship-links'}));if(!ids?.length)row.lastElementChild.append(el('span',{class:'quiet',text:'—'}));for(const id of ids||[]){const c=current.cells.find(c=>c.id===id);if(c)row.lastElementChild.append(el('button',{type:'button',class:'reference-chip',title:c.expression,onclick:()=>action(()=>selectCell(id)),text:c.name}));}return row;};
@@ -229,6 +247,10 @@ function inspector(){
  if(selected){const nodeList=el('div',{class:'node-list'});if(inspection?.cell.id===selected.id){for(const {id,node,children}of inspection.nodes.slice(0,60)){const args=Array.isArray(node.args)?node.args:[];const refs=children||args.filter(x=>typeof x==='number');nodeList.append(el('div',{class:'node'},el('span',{class:'node-id',text:`#${id}`}),el('span',{text:node.op==='reference'?'@'+node.args:node.op==='symbol'||node.op==='number'||node.op==='constant'?String(node.args):node.op==='call'?node.args[0]:node.args?.variable?`${node.op} · ${node.args.variable}`:node.op==='matrix'?`${node.args.rows}×${node.args.cols}`:node.op}),el('span',{class:'edge',text:refs.map(i=>`#${i}`).join(' ← ')})))}}else for(const symbol of selected.symbols)nodeList.append(el('div',{class:'node',text:symbol}));diagnostics.append(nodeList);}
  out.append(disclosure('seg',el('span',{text:t('seg_diagnostics')}),diagnostics));
  const list=el('ol',{class:'history-list'});for(const h of current.history)list.append(el('li',{class:'history-item'},el('span',{text:commandLabel(h.command)}),el('span',{class:'small',text:`${t(h.actor)} · ${h.branch} · r${h.revision}`})));if(!current.history.length)list.append(el('li',{class:'small',text:t('no_history')}));
+ const mathjson=el('div',{},el('div',{class:'reproduction-tools'},button('export_mathjson','package',()=>action(async()=>{await flushDrafts();const path=await invoke('export_mathjson',{generation:current.generation,revision:current.revision});if(path)mathjsonPath=path; }),current.selected?{}:{disabled:''}),button('import_mathjson','open',()=>action(async()=>{await flushDrafts();const s=await invoke('import_mathjson',{generation:current.generation});if(s){accept(s);applyLayout(await invoke('reveal_notebook',{generation:current.generation}));}})),button('mathjson_help','info',()=>{})));
+ if(mathjsonPath)mathjson.append(el('div',{class:'small reproduction-path',text:mathjsonPath}));
+ out.append(disclosure('mathjson',el('span',{text:'MathJSON'}),mathjson));
+ out.append(disclosure('reproduction',el('span',{text:t('reproduction')}),reproductionPanel()));
  out.append(disclosure('history',el('span',{},icon('history'),el('span',{text:t('history')}),el('span',{class:'small',text:String(current.history.length)})),list));
  return out;
 }

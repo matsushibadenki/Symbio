@@ -126,3 +126,15 @@ Cells are matched by document cell ID. Each changed entry has `status` (`added`,
 The desktop `compare_branches` read command additionally requires document generation and revision; stale requests are rejected. Its dedicated comparison WebView can read snapshots/layout and comparisons but is not authorized to edit the document or write files. The view refreshes when the document changes, including document switches. Unapplied drafts are intentionally excluded.
 
 The read request has its own [JSON Schema](comparison-request.schema.json); it is not a mutation request.
+
+## Reproduction packages
+
+The Rust API `reproduction::capture(&Project)` produces a typed, source-authoritative package for the active branch; `verify(&Package)` returns a per-cell replay report. `from_bytes`/`read` enforce bounded input and checksum validation; `write_new` atomically persists without replacing existing files. See [reproduction contract](reproduction.md) for payload fields, digest semantics, error/skip statuses and limitations.
+
+CLI export/verify are explicit subcommands, not mutation commands in a research document. Desktop `export_reproduction` checks document generation/revision around the Save dialog and refuses pending drafts; `verify_reproduction` checks generation around background replay. Both use the existing serialized native-file-operation guard. Verification does not grant a package access to files or mutation APIs.
+
+## MathJSON subset exchange
+
+`mathjson::export(&Project, cell_id)` returns a context envelope with resolved authored definitions and explicit assumptions. `mathjson::import(bytes)` creates a fresh Rust-owned `AppCore` with generated LaTeX source and normal kernel calculations; cached foreign outputs are never adopted. Standalone `encode`/`decode` bridge supported SEG nodes and standard expression values. See [format contract](mathjson.md).
+
+CLI `export-mathjson PROJECT JSON` and `import-mathjson JSON NEW_PROJECT` are explicit file commands outside the mutation envelope. Desktop `export_mathjson` uses generation/revision checks and no-clobber persistence; `import_mathjson` checks generation and adds a separate untitled session document. Both use native dialogs and pending-draft/file-operation guards. Neither service runs CortexJS or an external CAS.

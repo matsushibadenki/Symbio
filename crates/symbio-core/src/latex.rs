@@ -607,7 +607,7 @@ fn tex(g: &Graph, id: Id, depth: usize) -> Result<String> {
                         .map(|row| row.join(" & "))
                 })
                 .collect::<Result<Vec<_>>>()?;
-            format!("\\begin{{bmatrix}}{}\\end{{bmatrix}}", rows.join(" \\ "))
+            format!("\\begin{{bmatrix}}{}\\end{{bmatrix}}", rows.join(r" \\ "))
         }
         Node::Equation(a, b) => format!("{}={}", f(*a)?, f(*b)?),
         Node::Integral {

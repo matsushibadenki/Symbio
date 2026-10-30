@@ -180,3 +180,9 @@ html:has(.surface-body),body.surface-body,.surface-body #app,.surface-panel{back
 @media(max-width:600px){.comparison-columns{grid-template-columns:minmax(0,1fr)}.comparison-workspace .dialog-head select{max-width:160px}}
 .comparison-source{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}
 .comparison-workspace .cell-reference{cursor:default}
+.reproduction-tools{display:flex;gap:4px;margin-bottom:8px}
+.reproduction-panel>strong{display:block;margin:8px 0}
+.reproduction-path{overflow-wrap:anywhere;margin:8px 0}
+.reproduction-cell{padding:6px 0;border-top:1px solid var(--color-line)}
+.reproduction-cell summary{cursor:pointer}
+.reproduction-checksum{overflow-wrap:anywhere;margin-top:10px;font-family:var(--font-code);font-size:10px}

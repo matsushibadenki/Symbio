@@ -95,3 +95,15 @@ macOS predefined Quit invokes AppKit `terminate:` directly. The application repl
 ## Branch comparison
 
 `comparison::compare` runs directly against the Rust-owned project without cloning/checking out a branch or replaying calculations. Persistent cell identity connects renamed cells across branches; structural graph identity and evidence fields distinguish definition, dependency and result changes. It produces serializable view data for the CLI and a dedicated read-only desktop WebView. No comparison state is stored in the research document. The desktop validates generation and revision under the session lock, and frontend requests discard superseded responses. Applied edits or document switches rebuild the view from the new snapshot. The comparison window has no mutation/file authorization and no docking ownership.
+
+## Reproduction boundary
+
+The Rust-owned `reproduction` module serializes active-branch source inputs and expected evidence separately. Replay constructs a fresh project from source, resolves references, validates recipes and runs normal `execute` operations in dependency order. It does not trust cached SEG/result roots or replay audit events. Structural Merkle-style digests omit node identities; scalar floats use bit strings. Checksums cover typed payload serialization and provide no authenticity claim. Each cell executes against a temporary project so failed calculations do not leak partial graph mutations into later replay.
+
+Desktop file operations run on a blocking worker with native dialogs, generation/revision guards and no-clobber atomic writes. The WebView receives report data and Rust-generated result MathML; imported file text is never inserted as HTML. The current editor document remains separate from the replay project.
+
+## MathJSON exchange boundary
+
+`mathjson` maps a strict standard-library subset into SEG and back in Rust. The exchange envelope retains explicit assumptions while its `expression` member uses standard MathJSON values. Export resolves authored references, bounds expanded conversion and validates representability in the notebook source format. Import rebuilds generated LaTeX into a fresh AppCore and reuses normal computation; it never adopts foreign results or mutates the existing document's assumptions. Unsupported objects, ambiguous approximate numbers and metadata are rejected rather than stringified or silently ignored.
+
+Desktop exchange uses native file guards and no-clobber writes. Import adds a separate untitled Rust-owned session document and reveals the notebook; generation checks protect against old-document actions. The MathJSON matrix roundtrip also exposed and fixed a pre-existing LaTeX serializer row-delimiter bug. OpenMath and a general CAS runtime are not part of this adapter.

@@ -8,8 +8,46 @@ fn main() {
 }
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|s| s == "export-mathjson") && args.len() == 3 {
+        let mut store = ProjectStore::open(&args[1])?;
+        let core = AppCore::new(store.load()?.ok_or("project not found")?)?;
+        let id = core.project().current().selected.ok_or("select a cell")?;
+        symbio_core::mathjson::write_new(
+            &args[2],
+            &symbio_core::mathjson::export(core.project(), id)?,
+        )?;
+        return Ok(());
+    }
+    if args.first().is_some_and(|s| s == "import-mathjson") && args.len() == 3 {
+        let mut core = symbio_core::mathjson::import(&symbio_core::mathjson::read(&args[1])?)?;
+        let mut store = ProjectStore::open(&args[2])?;
+        if store.load()?.is_some() {
+            return Err("destination exists".into());
+        }
+        store.save(core.project())?;
+        core.mark_saved();
+        println!("{}", serde_json::to_string_pretty(&core.snapshot())?);
+        return Ok(());
+    }
+    if args.first().is_some_and(|s| s == "verify-reproduction") && args.len() == 2 {
+        let report =
+            symbio_core::reproduction::verify(&symbio_core::reproduction::read(&args[1])?)?;
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        if !report.reproduced {
+            return Err("reproduction incomplete or mismatched".into());
+        }
+        return Ok(());
+    }
+    if args.first().is_some_and(|s| s == "export-reproduction") && args.len() == 3 {
+        let mut store = ProjectStore::open(&args[1])?;
+        let core = AppCore::new(store.load()?.ok_or("project not found")?)?;
+        let package = symbio_core::reproduction::capture(core.project())?;
+        symbio_core::reproduction::write_new(&args[2], &package)?;
+        println!("{}", package.sha256);
+        return Ok(());
+    }
     if args.len() != 2 || !["init", "inspect", "serve"].contains(&args[0].as_str()) {
-        return Err("usage: symbio-cli init|inspect|serve /path/project.symbio".into());
+        return Err("usage: symbio-cli import-mathjson JSON NEW_PROJECT | export-mathjson PROJECT JSON | init|inspect|serve PROJECT | export-reproduction PROJECT PACKAGE | verify-reproduction PACKAGE".into());
     }
     let mut store = ProjectStore::open(&args[1])?;
     let project = match store.load()? {

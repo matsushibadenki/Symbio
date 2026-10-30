@@ -162,3 +162,48 @@ Native QA completed on macOS, in the 1000×720 comparison window:
 | Runtime console | Not captured by native UI automation; syntax checks, IPC interaction and rendered content passed. |
 
 The first native pass found an always-disabled button caused by serializing `disabled=false` as an HTML boolean attribute. It was corrected to omit the attribute when enabled; the rebuilt app's button and comparison flow passed. The original research document was restored saved at revision 55. Screenshot evidence: `/private/tmp/symbio-branch-comparison-ja.jpg`. Live edits/document switches are protected in implementation; they were not separately exercised while the comparison window remained open. Narrower window sizes, other platforms and extended sessions remain untested.
+
+## Source-based reproduction packages (2026-10-28)
+
+Target flow: Structure & history → Reproduction → native export → select a package → fresh source replay → per-cell evidence report, without modifying the editor document.
+
+- **115 Rust tests passed** (68 core, 47 desktop). Twelve new cases cover references and exact substitution, source/evidence changes, integrity checks, scalar float bits, engine mismatch, expected errors, dimensional failures, missing recipes/expectations, invalid/oversized inputs, collection/reload stability, LaTeX integrals/matrices/equations, legacy sample annotations, no-clobber/symlink behavior and bounded previews for shared DAGs.
+- **17 JavaScript tests passed**; syntax checks passed. Clippy with warnings denied passed; the unsigned development app built. Existing dependency `block 0.1.6` still emits its future compatibility notice.
+- `python3 scripts/smoke-reproduction.py`: passed export/replay, immutable source bytes, refusal to overwrite, checksum failure and a resealed expected-result mismatch. CLI verification exits nonzero for incomplete/mismatching packages.
+
+| Native macOS check (1280×800) | Result |
+| --- | --- |
+| Page identity / meaningful content | Passed: inspector reproduction section, localized native Save/Open dialogs and report content. |
+| Export | Passed: active graph-edit-demo branch written to a new temporary JSON file; save location and revision 59 retained. |
+| Replay match | Passed: sample package returned two matching results, zero differences/skips; expanded result displayed typeset `abs(x)`. |
+| Old engine evidence | Passed: the existing workspace's four recorded outputs were flagged as engine differences. Final UI explicitly displayed `symbio-rust/0.4.0 → symbio-rust/0.5.0`. Existing results were not replaced. |
+| Layout / error overlay | Passed: compact controls, wrapped path/checksum, expandable rows and MathML remained inside the inspector; no visible error overlay. |
+| Original document state | Passed: saved graph-edit-demo at revision 59 before and after verification. |
+| Console | Native UI tooling does not expose runtime console logs; syntax checks and actual IPC/file interactions passed. |
+
+Native validation used `cua_repl` because child WebViews and file dialogs require the desktop runtime. The Browser skill is not installed; a static browser preview would not exercise these paths. Evidence images are `/private/tmp/symbio-reproduction-matched-ja.jpg` and `/private/tmp/symbio-reproduction-engine-difference-ja.jpg`.
+
+Not validated here: Windows/Linux, cross-platform float agreement, large/long-running packages, cancellation during costly symbolic work and full environment reconstruction. Full historical event replay and formal proof are not implemented. The package checksum is not an authenticity signature.
+
+## Exact MathJSON subset exchange (2026-10-28)
+
+Target flow: Structure & history → MathJSON → export selected definition / import a JSON expression → new untitled notebook → normal Rust calculation.
+
+- **124 Rust tests passed** (77 core, 47 desktop), including nine new MathJSON cases: exact large integers/rationals, explicit versus absent domains, resolved references and unchanged owner state, matrix product/determinant after roundtrip, quadratic equation solving, object forms/constants/functions, rejected metadata/numbers/unsupported constructs, resource bounds and no-clobber behavior.
+- **17 JavaScript tests passed**, frontend syntax checks and Clippy with warnings denied passed. Unsigned development app built. Existing `block 0.1.6` future compatibility notice remains.
+- `scripts/smoke-mathjson.py` passed CLI import/export roundtrip, exact value `27021597764222980/3`, assumptions, unchanged input bytes, preserved existing destinations and unsupported `Log` rejection. Existing math-keyboard and reproduction smoke checks also passed after the LaTeX serializer change.
+
+| Native macOS check (1280×800) | Result |
+| --- | --- |
+| Page identity / meaningful content | Passed: localized MathJSON disclosure, controls and native Save/Open dialogs. |
+| Export | Passed: selected `a` saved as a new context JSON; original document stayed saved at revision 59 with the same save path. |
+| Import / document isolation | Passed: matrix JSON opened as a second untitled document; original research document retained separately. |
+| Notebook navigation | Passed: center switched from 3D to notebook automatically after import. |
+| Computation / typesetting | Passed: two 2×2 matrices displayed with rows intact and product `[[7,10],[15,22]]` calculated in Rust. |
+| Cleanup / original state | Passed: temporary imported document saved under `/private/tmp` and closed; original workspace restored saved at graph-edit-demo revision 59. |
+| Visual health | Passed at tested size: no visible overlay, clipping or overlapping controls; matrix rows aligned. |
+| Runtime console | Native automation does not expose console logs; syntax checks, IPC, dialogs and actual computation passed. |
+
+Validation used `cua_repl` for native child WebViews and dialogs. The Browser skill is not installed, and static browser preview cannot exercise this workflow. Screenshot: `/private/tmp/symbio-mathjson-matrix-ja.jpg`.
+
+The matrix product roundtrip exposed a pre-existing serializer bug: emitted LaTeX used a single row separator instead of the required double separator. The serializer now emits the correct delimiter, and roundtrip/determinant tests pass. Full MathJSON/OpenMath compatibility, non-ASCII identifiers, approximate literal provenance, calculus exchange, Windows/Linux and long-running large exchange inputs remain unimplemented or untested.
