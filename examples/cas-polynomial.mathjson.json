@@ -1,0 +1,9 @@
+{
+  "format": "symbio.mathjson",
+  "version": 1,
+  "name": "polynomial",
+  "expression": ["Equal", ["Power", "x", 6], 1],
+  "assumptions": {
+    "x": {"domain": "real", "nonzero": false, "dimension": null}
+  }
+}

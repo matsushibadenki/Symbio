@@ -117,7 +117,7 @@ impl Axes {
         };
         line([-2., floor, edge_y], [2.25, floor, edge_y], 0);
         line([edge_x, floor, -2.], [edge_x, floor, 2.25], 1);
-        let flat = z[0] == z[1] || z[1] - z[0] < 1e-10;
+        let flat = z[0] == z[1];
         line([edge_x, floor, edge_y], [edge_x, 1.5, edge_y], 2);
         for v in ticks(x) {
             let p = mapped(v, x, 4.);
@@ -280,5 +280,17 @@ mod precision_tests {
         );
         let range = [1e12, 1e12 + 1.];
         assert_ne!(super::text(1e12, range), super::text(1e12 + 0.5, range));
+    }
+    #[test]
+    fn small_nonzero_height_span_retains_separate_z_ticks() {
+        let a = super::Axes::build([-1., 1.], [-1., 1.], [0., 1e-12], 0.);
+        let z: Vec<_> = a
+            .labels
+            .iter()
+            .filter(|l| l.axis == "z" && !l.title)
+            .collect();
+        assert!(z.len() >= 2);
+        assert!(z.iter().any(|l| l.position[1] < -1.));
+        assert!(z.iter().any(|l| l.position[1] > 1.));
     }
 }

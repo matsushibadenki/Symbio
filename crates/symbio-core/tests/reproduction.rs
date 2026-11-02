@@ -320,6 +320,7 @@ fn latex_integrals_matrices_and_numeric_equations_replay_from_source() {
 #[test]
 fn shared_dag_results_are_checked_without_exponential_preview_expansion() {
     let payload = Payload {
+        environment: None,
         project_id: uuid::Uuid::new_v4(),
         document: "DAG".into(),
         branch: "main".into(),
@@ -365,4 +366,78 @@ fn shared_dag_results_are_checked_without_exponential_preview_expansion() {
     assert!(r.cells.last().unwrap().result_preview_omitted);
     assert!(r.cells.last().unwrap().result_mathml.is_none());
     assert!(r.cells.first().unwrap().result_mathml.is_some());
+}
+
+#[test]
+fn kernel_environment_is_captured_without_probing_and_roundtrips() {
+    let mut c = core();
+    define(&mut c, None, "f", "x^2");
+    let p = capture(c.project()).unwrap();
+    let e = p.payload.environment.as_ref().unwrap();
+    assert_eq!(*e, Environment::current());
+    assert_eq!(e.cargo_lock_sha256.len(), 64);
+    let p = from_bytes(&to_bytes(&p).unwrap()).unwrap();
+    let report = verify(&p).unwrap();
+    assert_eq!(report.environment_status, "matched");
+    assert!(report.environment_differences.is_empty());
+    assert!(report.reproduced);
+}
+#[test]
+fn environment_differences_are_separate_from_mathematical_replay() {
+    let mut c = core();
+    define(&mut c, None, "f", "x^2");
+    let mut p = capture(c.project()).unwrap();
+    let e = p.payload.environment.as_mut().unwrap();
+    e.os = "different-os".into();
+    e.cargo_lock_sha256 = "0".repeat(64);
+    seal(&mut p);
+    let r = verify(&p).unwrap();
+    assert!(r.reproduced);
+    assert_eq!(r.matched, 1);
+    assert_eq!(r.environment_status, "different");
+    assert_eq!(r.environment_differences, vec!["os", "cargo_lock_sha256"]);
+    assert_ne!(r.recorded_environment.unwrap(), r.current_environment);
+}
+#[test]
+fn legacy_packages_without_environment_keep_checksum_and_replay() {
+    let mut c = core();
+    define(&mut c, None, "f", "x^2");
+    let mut p = capture(c.project()).unwrap();
+    p.payload.environment = None;
+    seal(&mut p);
+    let bytes = to_bytes(&p).unwrap();
+    assert!(!String::from_utf8_lossy(&bytes).contains("environment"));
+    let decoded = from_bytes(&bytes).unwrap();
+    assert_eq!(decoded.sha256, p.sha256);
+    let r = verify(&decoded).unwrap();
+    assert!(r.reproduced);
+    assert_eq!(r.environment_status, "unrecorded");
+    assert!(r.recorded_environment.is_none());
+    assert!(r.environment_differences.is_empty());
+}
+#[test]
+fn invalid_and_tampered_environment_metadata_is_rejected() {
+    let mut c = core();
+    define(&mut c, None, "f", "1");
+    let mut p = capture(c.project()).unwrap();
+    p.payload.environment.as_mut().unwrap().os = "different-os".into();
+    assert!(verify(&p).is_err()); // Manifest is covered by the existing checksum.
+    seal(&mut p);
+    assert!(verify(&p).is_ok());
+    p.payload.environment.as_mut().unwrap().version = 2;
+    seal(&mut p);
+    assert!(matches!(verify(&p), Err(Error::Version)));
+    p.payload.environment = Some(Environment::current());
+    p.payload.environment.as_mut().unwrap().cargo_lock_sha256 = "../path".into();
+    seal(&mut p);
+    assert!(verify(&p).is_err());
+    p.payload.environment = Some(Environment::current());
+    p.payload.environment.as_mut().unwrap().arch = "a".repeat(129);
+    seal(&mut p);
+    assert!(verify(&p).is_err());
+    p.payload.environment = Some(Environment::current());
+    seal(&mut p);
+    let mut v = serde_json::to_value(p).unwrap();
+    v["payload"]["environment"]["executable"] = "python3".into();
+    assert!(from_bytes(&serde_json::to_vec(&v).unwrap()).is_err());
 }

@@ -1,5 +1,6 @@
 //! Symbio's UI-independent owner: all operations are revision-checked transactions.
 pub mod algebra;
+pub mod cas;
 pub mod collection;
 pub mod comparison;
 pub mod dependencies;
@@ -17,9 +18,17 @@ pub use model::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 pub use storage::ProjectStore;
-pub const ENGINE: &str = "symbio-rust/0.5.0";
+pub const ENGINE: &str = "symbio-rust/0.7.0";
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("configure a Python interpreter with SymPy")]
+    CasUnavailable,
+    #[error("CAS worker timed out")]
+    CasTimeout,
+    #[error("CAS worker failed")]
+    CasFailure,
+    #[error("CAS result failed independent validation")]
+    CasInvalid,
     #[error("revision conflict")]
     Conflict,
     #[error("missing cell reference: {0}")]
@@ -52,6 +61,10 @@ pub enum Error {
 impl Error {
     pub fn code(&self) -> &'static str {
         match self {
+            Self::CasUnavailable => "cas_unavailable",
+            Self::CasTimeout => "cas_timeout",
+            Self::CasFailure => "cas_failure",
+            Self::CasInvalid => "cas_invalid",
             Self::MissingReference(_) => "missing_reference",
             Self::DependencyCycle => "dependency_cycle",
             Self::Conflict => "revision_conflict",
@@ -565,7 +578,22 @@ fn execute(p: &mut Project, command: &Command) -> Result<()> {
                     )
                 })
                 .collect();
+            let mut engine = ENGINE.to_string();
             let (result, value, trust, precision) = match operation.as_str() {
+                "factor" => {
+                    let (r, version) = cas::factor(&mut p.graph, root, variable)?;
+                    engine = format!("{ENGINE}; sympy/{version}");
+                    conditions.push(
+                        "factorization over rationals; coefficient identity checked in Rust".into(),
+                    );
+                    (Some(r), None, Trust::Symbolic, "exact")
+                }
+                "solve_polynomial" => {
+                    let (r, version) = cas::solve(&mut p.graph, root, variable, &assumptions)?;
+                    engine = format!("{ENGINE}; sympy/{version}");
+                    conditions.push("real roots; rational factorization checked in Rust; linear/quadratic factors only; not a formal proof".into());
+                    (Some(r), None, Trust::Symbolic, "exact")
+                }
                 "solve" => {
                     conditions.push("real roots; symbolic solver, not a formal proof".into());
                     (
@@ -684,7 +712,7 @@ fn execute(p: &mut Project, command: &Command) -> Result<()> {
                 trust,
                 precision: precision.into(),
                 conditions,
-                engine: ENGINE.into(),
+                engine,
             };
             let revision = p.revision.checked_add(1).ok_or(Error::Limit)?;
             let c = p

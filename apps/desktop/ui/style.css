@@ -37,7 +37,7 @@
 .formula-stage math{font-family:var(--font-math);font-size:var(--formula-size);margin:auto;width:max-content;math-style:normal}
 .keyboard-tabs{flex-wrap:wrap}.keyboard-tabs button{white-space:nowrap}
 @media(max-width:430px){.formula math,.output .formula math{font-size:26px}.formula{padding:12px 20px 12px 4px}.formula-zoom{opacity:1}.formula-stage{padding:24px 4px}}
-.operation-bar:is([data-kind="matrix"],[data-kind="equation"],[data-kind="integral"],[data-kind="aggregate"],[data-kind="derivative"]) :is([data-operation="differentiate"],[data-operation="integrate"],[data-operation="expand"],[data-operation="plot"]){display:none}
+.operation-bar:is([data-kind="matrix"],[data-kind="equation"],[data-kind="integral"],[data-kind="aggregate"],[data-kind="derivative"]) :is([data-operation="differentiate"],[data-operation="integrate"],[data-operation="expand"],[data-operation="factor"],[data-operation="plot"]){display:none}
 
 .dependency-scroll{overflow:auto;max-height:300px;margin:10px 0 20px;border:1px solid var(--line,#d3dcdf);background:rgba(240,248,248,.45)}
 .dependency-stage{position:relative;margin-inline:auto}.dependency-edges{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}.dependency-edges path{fill:none;stroke:#a1b5b7;stroke-width:1.5}.dependency-edges path.active{stroke:#166573;stroke-width:2}
@@ -51,7 +51,7 @@
 /* Native wgpu paints below this transparent WebView. Only chrome is opaque. */
 html:has(.surface-body),body.surface-body,.surface-body #app,.surface-panel{background:transparent}
 .surface-panel .panel-header{height:40px;min-height:40px}
-.surface-controls{height:110px;flex:none;padding:4px 8px;background:var(--color-panel);border-bottom:1px solid var(--color-line)}
+.surface-controls{position:relative;height:110px;flex:none;padding:4px 8px;background:var(--color-panel);border-bottom:1px solid var(--color-line)}
 .surface-row{height:34px;display:flex;align-items:center;gap:4px;min-width:0;white-space:nowrap}
 .surface-row select{flex:1;width:60px}.surface-row input{width:calc((100% - 95px)/2);max-width:100px;padding:4px}.surface-row button{padding:4px;min-width:26px}.surface-row button[aria-pressed=true]{background:var(--color-selected);color:var(--color-accent)}
 .surface-formula{height:60px;flex:none;display:flex;align-items:center;justify-content:center;gap:8px;overflow:auto;padding:6px 12px;background:var(--color-paper);border-bottom:1px solid var(--color-line);font-size:21px}
@@ -186,3 +186,19 @@ html:has(.surface-body),body.surface-body,.surface-body #app,.surface-panel{back
 .reproduction-cell{padding:6px 0;border-top:1px solid var(--color-line)}
 .reproduction-cell summary{cursor:pointer}
 .reproduction-checksum{overflow-wrap:anywhere;margin-top:10px;font-family:var(--font-code);font-size:10px}
+.surface-compare-menu{position:static;flex:none}
+.surface-compare-menu>summary{display:flex;align-items:center;justify-content:center;padding:6px;min-height:30px;cursor:pointer;list-style:none;border-radius:4px}
+.surface-compare-menu>summary::-webkit-details-marker{display:none}
+.surface-compare-menu>summary:hover,.surface-compare-menu[open]>summary{background:var(--color-selected)}
+.surface-compare-choices{position:absolute;z-index:12;top:38px;left:8px;width:min(280px,calc(100% - 16px));max-height:45vh;overflow:auto;padding:8px 12px;background:var(--color-paper);border:1px solid var(--color-line);border-radius:6px;box-shadow:0 4px 16px #0002}
+.surface-compare-choices label{display:flex;gap:8px;padding:5px 0;overflow-wrap:anywhere}
+.surface-layer-list{position:absolute;left:10px;top:10px;display:flex;flex-direction:column;gap:4px;max-width:45%;pointer-events:auto}
+.surface-layer{display:flex;align-items:center;gap:6px;background:var(--color-paper);border:1px solid var(--color-line);border-radius:4px;padding:2px 6px;font-size:11px}
+.surface-layer>span:not(.surface-layer-swatch){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.surface-layer button{min-height:22px;padding:2px;margin-left:auto}.surface-layer button svg{width:12px;height:12px}
+.surface-layer-swatch{width:9px;height:9px;border-radius:50%;flex:none}.surface-layer-error{color:var(--color-error)}
+.surface-compare-choices input[type=checkbox]{width:auto;max-width:none;flex:none;margin:0}
+
+.cas-settings>input{width:100%;min-width:0;box-sizing:border-box}.cas-settings{display:grid;gap:6px}
+
+.environment-report{margin-block:8px}.environment-table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:10px}.environment-table th,.environment-table td{vertical-align:top;text-align:start;padding:5px 3px;border-bottom:1px solid var(--line,#d4dce0);overflow-wrap:anywhere}.environment-table .environment-difference{background:rgba(200,140,40,.12)}

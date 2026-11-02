@@ -1,0 +1,7 @@
+{
+  "format": "symbio.mathjson",
+  "version": 1,
+  "name": "integral",
+  "expression": ["Integrate", ["Power", "x", 2], ["Tuple", "x", 0, 2]],
+  "assumptions": {}
+}

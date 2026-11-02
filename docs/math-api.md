@@ -138,3 +138,23 @@ CLI export/verify are explicit subcommands, not mutation commands in a research 
 `mathjson::export(&Project, cell_id)` returns a context envelope with resolved authored definitions and explicit assumptions. `mathjson::import(bytes)` creates a fresh Rust-owned `AppCore` with generated LaTeX source and normal kernel calculations; cached foreign outputs are never adopted. Standalone `encode`/`decode` bridge supported SEG nodes and standard expression values. See [format contract](mathjson.md).
 
 CLI `export-mathjson PROJECT JSON` and `import-mathjson JSON NEW_PROJECT` are explicit file commands outside the mutation envelope. Desktop `export_mathjson` uses generation/revision checks and no-clobber persistence; `import_mathjson` checks generation and adds a separate untitled session document. Both use native dialogs and pending-draft/file-operation guards. Neither service runs CortexJS or an external CAS.
+
+## Desktop surface comparison state
+
+The desktop-only `surface_command` endpoint now requires `generation` and `revision` alongside its `command`. `{"kind":"compare","ids":[4,5]}` selects up to three comparison cells in addition to the primary cell; `ids:[]` clears them. IDs must exist in the current branch, be unique and exclude the primary. Existing select/range/orbit/wire/reset commands use the same context guards. These are viewport operations, not core research mutations.
+
+`surface_state` adds `comparisons`, `generation` and `layers` (`id`, `name`, RGB `color`, `status`, `samples`, `omitted`, optional `heights`). Top-level `heights` is the common extent of valid layers; total sample counts include completed valid samplings. A failed layer keeps an error entry while valid layers still render. Axis frames carry generation and comparisons too. Uniform sampling and approximate trust remain unchanged; no sampled grid or mesh is returned.
+
+## Optional CAS operation
+
+`math.transform` accepts `factor`, with the selected `variable`. It factors bounded rational univariate polynomials via the application-configured local SymPy worker. Returned product identities are checked with Rust exact coefficients; output stays Symbolic and records both engine versions. Recipes persist and replay on dependency changes. See [CAS configuration and limits](cas.md).
+
+MathJSON exchange now accepts explicit `D`, `Integrate`, `Sum` and `Product` operators, using one explicit variable or `Tuple(variable, lower, upper)` as documented in [the exchange contract](mathjson.md). They map to authored SEG operators and retain the normal Rust calculation/error behavior; they do not invoke external CAS.
+
+Reproduction reports additionally expose `recorded_environment`, `current_environment`, `environment_status` (`matched`, `different`, `unrecorded`) and `environment_differences`. The optional `payload.environment` records the exporting build's bounded kernel manifest; it is not a per-calculation historical environment. Environment mismatches do not alter result-based `reproduced` or invoke tools. See [reproduction](reproduction.md).
+
+## MCP stdio
+
+`symbio-cli mcp` is a separate stateless JSON-RPC entry point. It exposes `math_calculate` and `math_preview_latex`, with schemas in [mcp-tools.json](mcp-tools.json). It does not accept the JSONL project-mutation envelope or touch desktop state. See [protocol and permissions](mcp.md).
+
+`math.transform` also accepts `solve_polynomial`: an explicit univariate rational polynomial equation of total degree ≤32, with a configured local CAS. Rust checks the factorization identity, then solves all linear/quadratic factors exactly over the reals. Any higher-degree residual factor rejects the whole operation. Results remain Symbolic; default reproduction skips the recipe unless external CAS is allowed. See [solver limits](cas.md). This operation is not included in the stateless MCP tool allowlist.

@@ -1,4 +1,5 @@
 mod axes3d;
+mod cas_settings;
 mod files;
 mod layout;
 mod plot;
@@ -140,7 +141,13 @@ async fn reveal_notebook(
             .lock()
             .map_err(|_| error("internal_error"))?
             .check_generation(generation)?;
-        let revision = app.state::<workspace::Workspace>().snapshot().revision;
+        let layout = app.state::<workspace::Workspace>().snapshot();
+        // Native file-dialog focus changes can briefly occupy the dock controller.
+        // Do not perform a layout mutation when the destination is already selected.
+        if layout.selected(layout::Panel::Notebook) {
+            return Ok(layout);
+        }
+        let revision = layout.revision;
         workspace::execute(
             &app,
             layout::Command::Select {
@@ -338,6 +345,8 @@ fn main() {
         .manage(surface3d::Surface3d::default())
         .manage(Drafts::default())
         .setup(|app| {
+            app.manage(cas_settings::Settings::default());
+            cas_settings::initialize(app.handle());
             let args: Vec<_> = std::env::args().skip(1).collect();
             let path = if args.len() == 2 && args[0] == "--project" {
                 std::path::PathBuf::from(&args[1])
@@ -386,6 +395,8 @@ fn main() {
             files::new_document,
             files::open_document,
             files::save_as,
+            cas_settings::cas_state,
+            cas_settings::configure_cas,
             files::export_reproduction,
             files::verify_reproduction,
             files::export_mathjson,

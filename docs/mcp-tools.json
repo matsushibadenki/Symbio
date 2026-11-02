@@ -1,0 +1,192 @@
+{
+  "tools": [
+    {
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "name": "math_calculate",
+      "title": "Calculate in a fresh SEG",
+      "description": "Evaluate or transform one Expression/LaTeX source using the bounded Rust kernel. Explicit assumptions, variable and numeric bindings. Returns typeset result, trust, precision, engine, conditions and SEG. Stateless: no documents, files, references to other calls, external CAS or network.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source"
+        ],
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "source_format": {
+            "enum": [
+              "expression",
+              "latex"
+            ],
+            "default": "expression"
+          },
+          "operation": {
+            "enum": [
+              "compute",
+              "simplify",
+              "differentiate",
+              "integrate",
+              "expand",
+              "solve",
+              "determinant",
+              "inverse",
+              "transpose",
+              "evaluate"
+            ],
+            "default": "compute"
+          },
+          "variable": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z_0-9]{0,47}$",
+            "default": "x"
+          },
+          "assumptions": {
+            "type": "object",
+            "maxProperties": 64,
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "domain"
+              ],
+              "properties": {
+                "domain": {
+                  "enum": [
+                    "unspecified",
+                    "real",
+                    "nonnegative",
+                    "positive",
+                    "complex"
+                  ]
+                },
+                "nonzero": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "dimension": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "array",
+                      "minItems": 3,
+                      "maxItems": 3,
+                      "items": {
+                        "type": "integer",
+                        "minimum": -2147483648,
+                        "maximum": 2147483647
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "propertyNames": {
+              "pattern": "^[A-Za-z_][A-Za-z_0-9]{0,47}$"
+            }
+          },
+          "bindings": {
+            "type": "object",
+            "maxProperties": 64,
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "Finite numeric values used only with operation evaluate. Other operations reject nonempty bindings.",
+            "propertyNames": {
+              "pattern": "^[A-Za-z_][A-Za-z_0-9]{0,47}$"
+            }
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "operation": {
+                  "const": "evaluate"
+                }
+              },
+              "required": [
+                "operation"
+              ]
+            },
+            "then": {},
+            "else": {
+              "properties": {
+                "bindings": {
+                  "maxProperties": 0
+                }
+              }
+            }
+          }
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "ok",
+          "engine"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "engine": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "name": "math_preview_latex",
+      "title": "Preview mathematical LaTeX",
+      "description": "Parse bounded mathematical LaTeX into the shared Rust representation and return MathML, expression text and parameters. No TeX execution or calculation, documents or file access.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source"
+        ],
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "ok",
+          "engine"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "engine": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  ]
+}

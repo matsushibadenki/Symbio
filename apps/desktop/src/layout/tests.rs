@@ -440,3 +440,34 @@ fn v3_layout_adds_surface_tab_without_losing_existing_panels() {
     assert_eq!(groups.len(), 3);
     assert!(matches!(migrated.root,Some(Node::Split{ratio,..}) if ratio==0.25));
 }
+
+#[test]
+fn selected_panel_tracks_docked_and_floating_tab_groups() {
+    let mut s = LayoutState::default();
+    assert!(s.selected(Panel::Notebook));
+    assert!(!s.selected(Panel::Surface));
+    apply(
+        &mut s,
+        Command::Select {
+            panel: Panel::Surface,
+        },
+    );
+    assert!(s.selected(Panel::Surface));
+    assert!(!s.selected(Panel::Notebook));
+    apply(
+        &mut s,
+        Command::FloatGroup {
+            panel: Panel::Surface,
+        },
+    );
+    assert!(s.selected(Panel::Surface));
+    assert!(!s.selected(Panel::Notebook));
+    apply(
+        &mut s,
+        Command::Select {
+            panel: Panel::Notebook,
+        },
+    );
+    assert!(s.selected(Panel::Notebook));
+    assert!(!s.selected(Panel::Surface));
+}

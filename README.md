@@ -164,7 +164,7 @@ Serving `apps/desktop/ui` through a static server provides a **read-only** previ
 
 **Substitute** accepts exact literals such as `2`, `0.1` and `1/3`; blank fields remain symbolic. For `z = x^2-y^2`, entering only `x=2` produces `z = 4-y^2`. **Numeric** with `x=2,y=3` produces `z ≈ -5` without error guarantees. Saved recipes replay after dependency changes. Definitions and linked references are typeset, model inputs are separated from explicit outputs, and unconfigured parameters display an Unspecified domain.
 
-Read the [mathematical contract](docs/mathematical-contract.md) and [screenshot feedback review](docs/feedback-review.md). The runtime is the bounded Rust kernel; optional `python3 scripts/smoke-research-contract.py` compares six cases with locally installed SymPy, which is not a runtime dependency.
+Read the [mathematical contract](docs/mathematical-contract.md) and [screenshot feedback review](docs/feedback-review.md). The runtime is the bounded Rust kernel, with an [optional local SymPy adapter](docs/cas.md) for exact rational univariate polynomial factorization. The optional `python3 scripts/smoke-research-contract.py` compares six cases with locally installed SymPy, which is not required for the Rust-only runtime.
 
 ## Compare research branches
 
@@ -187,7 +187,7 @@ Read the [reproduction contract](docs/reproduction.md). This is bounded current-
 
 ## MathJSON expression exchange
 
-**Structure & history → MathJSON** exports the selected definition with resolved references and explicit assumptions, or imports a supported exact MathJSON expression into a new untitled document. It supports basic arithmetic, exact integers/rationals, elementary functions, equations and rectangular matrices. Large integers remain exact. Unsupported constructs are rejected rather than converted to text.
+**Structure & history → MathJSON** exports the selected definition with resolved references and explicit assumptions, or imports a supported exact MathJSON expression into a new untitled document. It supports basic arithmetic, exact integers/rationals, elementary functions, equations, rectangular matrices, explicit derivatives/integrals and finite sums/products. Large integers remain exact. Unsupported constructs are rejected rather than converted to text.
 
 ```sh
 cargo run --locked -p symbio-cli -- export-mathjson study.symbio expression.mathjson.json
@@ -195,3 +195,31 @@ cargo run --locked -p symbio-cli -- import-mathjson expression.mathjson.json new
 ```
 
 Existing files are never overwritten. See the [supported subset and context envelope](docs/mathjson.md), [model example](examples/mathjson-model.json) and [matrix example](examples/mathjson-matrix.json). OpenMath and full MathJSON compatibility are not implemented.
+
+## Compare 3D surfaces
+
+In the central **3D** tab, choose the primary cell, then use the layers icon to add up to three comparison cells from the current branch. Colored legend entries identify each cell; use their close buttons or uncheck a cell to remove it. The popover closes on Escape or an outside click.
+
+All surfaces use the same x/y ranges and one shared z scale, including constant planes at different heights. Each layer reports its own errors, valid/omitted samples and height extent; a failed layer does not hide valid ones. The footer shows valid/selected surface counts. Legend tooltips show per-layer extents and sampling information. Surfaces are opaque, so rotate the view or remove a layer to inspect occluded geometry.
+
+Sampling remains a **65×65 float64 grid per surface**, without certified errors, adaptive refinement or publication export. Meshes, shared coordinate transforms and GPU buffers remain in Rust/wgpu. Only selections, camera/ranges and small layer/axis metadata cross the WebView bridge. Comparison selection is temporary and resets on document switches or Save As; it does not edit expressions or research history.
+
+### Optional factorization
+
+Configure an existing Python interpreter with SymPy in **Structure & history → CAS · SymPy**, then use `(·)(·)` in the selected notebook cell. Rust checks the expanded coefficient identity. Results remain Symbolic, and external replay requires explicit opt-in. See [scope, configuration and execution limits](docs/cas.md).
+
+### Calculus exchange
+
+MathJSON import/export also preserves explicit derivatives, definite/indefinite integrals, and finite sums/products as SEG operators. For example, importing `["Integrate", ["Power", "x", 2], ["Tuple", "x", 0, 2]]` displays the integral and computes `8/3` with the existing Rust kernel. Export retains the original integral and limits. See [supported forms and limits](docs/mathjson.md) and [an example](examples/calculus.mathjson.json).
+
+### Reproduction environment comparison
+
+New reproduction packages record a bounded exporter kernel manifest: build-target OS/architecture, pointer width, byte order, core package version, numeric policy and embedded Cargo.lock SHA-256. GUI and CLI compare these fields separately from result replay. Older packages report an unrecorded environment. This is not a complete historical environment, source/binary fingerprint or environment installer. See [the reproduction contract](docs/reproduction.md).
+
+### Local MCP tools
+
+Run `symbio-cli mcp` for stateless Rust calculations and LaTeX previews over MCP stdio. Tools return structured SEG, MathML and mathematical evidence through published JSON Schemas. They do not access open documents, write files, invoke external CAS or retain assumptions across calls. See [setup, protocol and limits](docs/mcp.md).
+
+### Higher-degree polynomial equations
+
+With local SymPy configured, the equation action `x = ? · CAS` finds exact real roots when every rational factor has degree one or two (total degree ≤32). Rust checks the factor-product identity and solves every factor. Higher-degree residual factors reject the complete operation, so partial roots are never presented as all solutions. The original `x = ?` remains an offline quadratic solver. See [scope and evidence](docs/cas.md) and [an importable equation](examples/cas-polynomial.mathjson.json).

@@ -1,3 +1,4 @@
+mod mcp;
 use std::io::{self, BufRead, Read, Write};
 use symbio_core::{AppCore, Project, ProjectStore, Request};
 fn main() {
@@ -8,6 +9,9 @@ fn main() {
 }
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
+    if args.as_slice() == ["mcp"] {
+        return mcp::serve(io::stdin().lock(), io::stdout().lock());
+    }
     if args.first().is_some_and(|s| s == "export-mathjson") && args.len() == 3 {
         let mut store = ProjectStore::open(&args[1])?;
         let core = AppCore::new(store.load()?.ok_or("project not found")?)?;
@@ -29,9 +33,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         println!("{}", serde_json::to_string_pretty(&core.snapshot())?);
         return Ok(());
     }
-    if args.first().is_some_and(|s| s == "verify-reproduction") && args.len() == 2 {
-        let report =
-            symbio_core::reproduction::verify(&symbio_core::reproduction::read(&args[1])?)?;
+    if args.first().is_some_and(|s| s == "verify-reproduction")
+        && (args.len() == 2 || (args.len() == 3 && args[2] == "--allow-cas"))
+    {
+        let report = symbio_core::reproduction::verify_with_cas(
+            &symbio_core::reproduction::read(&args[1])?,
+            args.len() == 3,
+        )?;
         println!("{}", serde_json::to_string_pretty(&report)?);
         if !report.reproduced {
             return Err("reproduction incomplete or mismatched".into());
@@ -47,7 +55,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     if args.len() != 2 || !["init", "inspect", "serve"].contains(&args[0].as_str()) {
-        return Err("usage: symbio-cli import-mathjson JSON NEW_PROJECT | export-mathjson PROJECT JSON | init|inspect|serve PROJECT | export-reproduction PROJECT PACKAGE | verify-reproduction PACKAGE".into());
+        return Err("usage: symbio-cli mcp | import-mathjson JSON NEW_PROJECT | export-mathjson PROJECT JSON | init|inspect|serve PROJECT | export-reproduction PROJECT PACKAGE | verify-reproduction PACKAGE [--allow-cas]".into());
     }
     let mut store = ProjectStore::open(&args[1])?;
     let project = match store.load()? {

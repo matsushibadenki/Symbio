@@ -197,7 +197,7 @@ fn bounds_and_no_clobber_are_enforced() {
     assert_eq!(before, read(&path).unwrap());
 }
 #[test]
-fn unsupported_seg_nodes_are_not_silently_stringified() {
+fn calculus_exports_authored_binder_instead_of_its_cached_result() {
     let mut c = AppCore::new(Project::empty("Calculus").unwrap()).unwrap();
     edit(
         &mut c,
@@ -207,10 +207,171 @@ fn unsupported_seg_nodes_are_not_silently_stringified() {
             source: r"\int_0^1 x^2\,dx".into(),
         },
     );
-    assert!(export(c.project(), 1).is_err());
+    let e = export(c.project(), 1).unwrap();
+    assert_eq!(
+        e.expression,
+        json!(["Integrate", ["Power", "x", {"num":"2"}], ["Tuple", "x", {"num":"0"}, {"num":"1"}]])
+    );
+    let copy = import(&to_bytes(&e).unwrap()).unwrap();
+    assert_eq!(copy.snapshot().cells[0].result_text.as_deref(), Some("1/3"));
     let c = load(json!(["Divide", 1, 0]));
     assert_eq!(
         c.snapshot().cells[0].cell.calculation_error.as_deref(),
         Some("domain_error")
+    );
+}
+
+#[test]
+fn calculus_forms_preserve_binders_and_compute_exactly() {
+    for (v, expected) in [
+        (json!(["D", ["Power", "x", 3], "x"]), "(3 * (x ^ 2))"),
+        (
+            json!(["Integrate", ["Power", "x", 2], ["Tuple", "x", 0, 2]]),
+            "8/3",
+        ),
+        (
+            json!(["Sum", ["Power", "k", 2], ["Tuple", "k", 1, 3]]),
+            "14",
+        ),
+        (json!(["Product", "k", ["Tuple", "k", 1, 4]]), "24"),
+        (json!(["Sum", "k", ["Tuple", "k", 3, 1]]), "0"),
+        (json!(["Product", "k", ["Tuple", "k", 3, 1]]), "1"),
+    ] {
+        let c = load(v);
+        assert_eq!(c.snapshot().cells[0].result_text.as_deref(), Some(expected));
+        let e = export(c.project(), 1).unwrap();
+        let copy = import(&to_bytes(&e).unwrap()).unwrap();
+        assert_eq!(
+            copy.snapshot().cells[0].result_text,
+            c.snapshot().cells[0].result_text
+        );
+        assert_eq!(export(copy.project(), 1).unwrap().expression, e.expression);
+    }
+}
+#[test]
+fn calculus_structure_scope_and_context_survive_roundtrip() {
+    let v = json!([
+        "Sum",
+        ["Integrate", ["Add", "x", "k"], ["Tuple", "x", 0, "y"]],
+        ["Tuple", "k", 1, 3]
+    ]);
+    let c = load(v);
+    let s = c.snapshot();
+    assert_eq!(s.cells[0].parameters, vec!["y"]);
+    let e = export(c.project(), 1).unwrap();
+    let copy = import(&to_bytes(&e).unwrap()).unwrap();
+    assert_eq!(export(copy.project(), 1).unwrap().expression, e.expression);
+    // An unsupported evaluation must retain its authored mathematical object.
+    let c = load(json!(["Integrate", ["Sin", ["Power", "x", 2]], "x"]));
+    assert_eq!(
+        c.snapshot().cells[0].cell.calculation_error.as_deref(),
+        Some("unsupported")
+    );
+    assert!(
+        export(c.project(), 1)
+            .unwrap()
+            .expression
+            .to_string()
+            .contains("Integrate")
+    );
+    // Bare D remains a physical symbol, while [D, body, variable] is an operator.
+    assert_eq!(load(json!("D")).snapshot().cells[0].parameters, vec!["D"]);
+    let c = load(json!(["D", ["D", ["Power", "x", 3], "x"], "x"]));
+    assert!(c.snapshot().cells[0].cell.source.contains("\\frac"));
+}
+#[test]
+fn ambiguous_calculus_and_invalid_shapes_are_rejected() {
+    for v in [
+        json!(["D", "x"]),
+        json!(["D", "x", 2]),
+        json!(["D", "x", "Pi"]),
+        json!(["Derivative", "x", "x"]),
+        json!(["Integrate", "x", ["Tuple", 0, 1]]),
+        json!(["Integrate", "x", ["Tuple", "x", 0]]),
+        json!(["Integrate", "x", "x", "y"]),
+        json!(["Sum", "k", ["Tuple", "k", 1, 3, 2]]),
+        json!(["Sum", "k", "k"]),
+        json!(["Integrate", "x", ["Tuple", "x", 0, "Infinity"]]),
+        json!(["D", ["List", ["List", 1]], "x"]),
+        json!(["Product", "x", ["Tuple", "x", ["Equal", "a", "b"], 3]]),
+    ] {
+        assert!(import(&serde_json::to_vec(&v).unwrap()).is_err(), "{v}");
+    }
+    assert!(matches!(
+        import(&serde_json::to_vec(&json!(["Sum", "k", ["Tuple", "k", 1, 300]])).unwrap()),
+        Err(Error::Limit)
+    ));
+    let c = load(json!(["Sum", "k", ["Tuple", "k", ["Rational", 1, 2], 3]]));
+    assert_eq!(
+        c.snapshot().cells[0].cell.calculation_error.as_deref(),
+        Some("unsupported")
+    );
+}
+
+#[test]
+fn calculus_variable_objects_and_bounds_keep_free_parameters() {
+    for v in [
+        json!({"fn":["Integrate", {"fn":["Power", "x", 2]}, {"sym":"x"}]}),
+        json!(["D", ["Power", "theta", 3], {"sym":"theta"}]),
+        json!(["Sum", "k", {"fn":["Tuple", {"sym":"k"}, "k", 3]}]),
+        json!([
+            "Sum",
+            ["Sum", "k", ["Tuple", "k", 1, 2]],
+            ["Tuple", "k", 1, 3]
+        ]),
+    ] {
+        let c = load(v);
+        let e = export(c.project(), 1).unwrap();
+        let copy = import(&to_bytes(&e).unwrap()).unwrap();
+        assert_eq!(e.expression, export(copy.project(), 1).unwrap().expression);
+        assert_eq!(
+            c.snapshot().cells[0].parameters,
+            copy.snapshot().cells[0].parameters
+        );
+    }
+    let c = load(json!(["Sum", "k", ["Tuple", "k", "k", 3]]));
+    assert_eq!(c.snapshot().cells[0].parameters, vec!["k"]);
+    let mut v = envelope(json!(["Integrate", ["Power", "x", 2], "x"]));
+    v["assumptions"] = json!({"x":{"domain":"positive","nonzero":true,"dimension":null}});
+    let c = load(v);
+    let e = export(c.project(), 1).unwrap();
+    assert_eq!(e.assumptions["x"].domain, Domain::Positive);
+    assert!(
+        c.snapshot().cells[0]
+            .cell
+            .output
+            .as_ref()
+            .unwrap()
+            .conditions
+            .iter()
+            .any(|s| s.contains("constant C"))
+    );
+}
+
+#[test]
+fn binder_operands_do_not_capture_surrounding_operations_in_generated_latex() {
+    for v in [
+        json!(["Add", ["D", ["Power", "x", 2], "x"], "x"]),
+        json!(["Multiply", ["D", ["Power", "x", 2], "x"], "x"]),
+        json!(["Power", ["D", ["Power", "x", 2], "x"], 2]),
+        json!(["Multiply", ["Sum", "k", ["Tuple", "k", 1, 3]], "k"]),
+        json!(["Power", ["Product", "k", ["Tuple", "k", 1, 3]], 2]),
+        json!(["Multiply", ["Integrate", ["Power", "x", 2], "x"], "x"]),
+        json!([
+            "Add",
+            ["Integrate", ["Power", "x", 2], ["Tuple", "x", 0, 2]],
+            "x"
+        ]),
+    ] {
+        let mut g = graph::Graph::default();
+        let root = decode(&mut g, &v).unwrap();
+        let expected = encode(&g, root).unwrap();
+        let c = load(v.clone());
+        assert_eq!(export(c.project(), 1).unwrap().expression, expected, "{v}");
+    }
+    let c = load(json!(["Add", ["D", ["Power", "x", 2], "x"], "x"]));
+    assert_eq!(
+        c.snapshot().cells[0].result_text.as_deref(),
+        Some("(3 * x)")
     );
 }

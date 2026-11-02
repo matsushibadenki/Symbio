@@ -620,10 +620,13 @@ fn tex(g: &Graph, id: Id, depth: usize) -> Result<String> {
                 (Some(l), Some(u)) => format!("_{{{}}}^{{{}}}", f(*l)?, f(*u)?),
                 _ => String::new(),
             };
-            format!("\\int{limits}{{{}}}\\,d\\mathit{{{variable}}}", f(*body)?)
+            format!(
+                "{{\\int{limits}{{{}}}\\,d\\mathit{{{variable}}}}}",
+                f(*body)?
+            )
         }
         Node::Derivative { body, variable } => format!(
-            "\\frac{{d}}{{d\\mathit{{{variable}}}}}\\left({}\\right)",
+            "{{\\frac{{d}}{{d\\mathit{{{variable}}}}}\\left({}\\right)}}",
             f(*body)?
         ),
         Node::Aggregate {
@@ -633,7 +636,7 @@ fn tex(g: &Graph, id: Id, depth: usize) -> Result<String> {
             upper,
             product,
         } => format!(
-            "\\{}_{{\\mathit{{{variable}}}={}}}^{{{}}}{{{}}}",
+            "{{\\{}_{{\\mathit{{{variable}}}={}}}^{{{}}}{{{}}}}}",
             if *product { "prod" } else { "sum" },
             f(*lower)?,
             f(*upper)?,

@@ -73,6 +73,22 @@ fn head(v: &Value) -> Option<&[Value]> {
             .map(Vec::as_slice)
     })
 }
+// A binder must name a symbol explicitly; never infer variables from expression text.
+fn variable(v: &Value) -> Result<String> {
+    let s = v
+        .as_str()
+        .or_else(|| {
+            v.as_object()
+                .filter(|o| o.len() == 1)
+                .and_then(|o| o.get("sym"))
+                .and_then(Value::as_str)
+        })
+        .ok_or_else(unsupported)?;
+    if !user_symbol(s) {
+        return Err(unsupported());
+    }
+    Ok(s.into())
+}
 pub fn decode(g: &mut Graph, v: &Value) -> Result<Id> {
     fn go(g: &mut Graph, v: &Value, depth: usize, budget: &mut usize) -> Result<Id> {
         if depth > 48 || *budget == 0 {
@@ -116,6 +132,48 @@ pub fn decode(g: &mut Graph, v: &Value) -> Result<Id> {
         let a = head(v).ok_or_else(unsupported)?;
         let f = a.first().and_then(Value::as_str).ok_or_else(unsupported)?;
         let args = &a[1..];
+        if matches!(f, "D" | "Integrate" | "Sum" | "Product") {
+            if args.len() != 2 {
+                return Err(unsupported());
+            }
+            let body = go(g, &args[0], depth + 1, budget)?;
+            if f == "D" {
+                return g.intern(Node::Derivative {
+                    body,
+                    variable: variable(&args[1])?,
+                });
+            }
+            if f == "Integrate" && (args[1].is_string() || args[1].get("sym").is_some()) {
+                return g.intern(Node::Integral {
+                    body,
+                    variable: variable(&args[1])?,
+                    lower: None,
+                    upper: None,
+                });
+            }
+            let limits = head(&args[1])
+                .filter(|a| a.len() == 4 && a[0].as_str() == Some("Tuple"))
+                .ok_or_else(unsupported)?;
+            let variable = variable(&limits[1])?;
+            let lower = go(g, &limits[2], depth + 1, budget)?;
+            let upper = go(g, &limits[3], depth + 1, budget)?;
+            return g.intern(if f == "Integrate" {
+                Node::Integral {
+                    body,
+                    variable,
+                    lower: Some(lower),
+                    upper: Some(upper),
+                }
+            } else {
+                Node::Aggregate {
+                    body,
+                    variable,
+                    lower,
+                    upper,
+                    product: f == "Product",
+                }
+            });
+        }
         if f == "List" {
             if args.is_empty() || args.len() > 8 {
                 return Err(unsupported());
@@ -262,6 +320,54 @@ pub fn encode(g: &Graph, root: Id) -> Result<Value> {
                     _ => return Err(unsupported()),
                 };
                 json!([f, go(g, *x, depth + 1, budget)?])
+            }
+            Node::Derivative { body, variable: v } => {
+                if !user_symbol(v) {
+                    return Err(unsupported());
+                }
+                json!(["D", go(g, *body, depth + 1, budget)?, v])
+            }
+            Node::Integral {
+                body,
+                variable: v,
+                lower,
+                upper,
+            } => {
+                if !user_symbol(v) {
+                    return Err(unsupported());
+                }
+                let limits = match (lower, upper) {
+                    (None, None) => json!(v),
+                    (Some(l), Some(u)) => json!([
+                        "Tuple",
+                        v,
+                        go(g, *l, depth + 1, budget)?,
+                        go(g, *u, depth + 1, budget)?
+                    ]),
+                    _ => return Err(unsupported()),
+                };
+                json!(["Integrate", go(g, *body, depth + 1, budget)?, limits])
+            }
+            Node::Aggregate {
+                body,
+                variable: v,
+                lower,
+                upper,
+                product,
+            } => {
+                if !user_symbol(v) {
+                    return Err(unsupported());
+                }
+                json!([
+                    if *product { "Product" } else { "Sum" },
+                    go(g, *body, depth + 1, budget)?,
+                    [
+                        "Tuple",
+                        v,
+                        go(g, *lower, depth + 1, budget)?,
+                        go(g, *upper, depth + 1, budget)?
+                    ]
+                ])
             }
             Node::Matrix {
                 rows,

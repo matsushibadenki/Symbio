@@ -184,6 +184,8 @@ pub fn validate_plan(plan: &Calculation) -> Result<()> {
             "differentiate",
             "integrate",
             "expand",
+            "factor",
+            "solve_polynomial",
             "evaluate",
             "substitute",
             "solve",

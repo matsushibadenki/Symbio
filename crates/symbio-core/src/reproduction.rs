@@ -26,6 +26,79 @@ pub struct Payload {
     pub engine: String,
     pub assumptions: BTreeMap<String, Assumption>,
     pub cells: Vec<RecipeCell>,
+    // Omit when absent so legacy v1 payloads keep their original checksum bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<Environment>,
+}
+/// Non-identifying kernel environment. No paths, hostnames or runtime probing.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Environment {
+    pub version: u32,
+    pub os: String,
+    pub arch: String,
+    pub pointer_width: u32,
+    pub endian: String,
+    pub core_version: String,
+    pub numeric_model: String,
+    pub cargo_lock_sha256: String,
+}
+impl Environment {
+    pub fn current() -> Self {
+        Self {
+            version: 1,
+            os: std::env::consts::OS.into(),
+            arch: std::env::consts::ARCH.into(),
+            pointer_width: usize::BITS,
+            endian: if cfg!(target_endian = "little") {
+                "little"
+            } else {
+                "big"
+            }
+            .into(),
+            core_version: env!("CARGO_PKG_VERSION").into(),
+            numeric_model: "exact-rational+ieee754-binary64;uncertified".into(),
+            cargo_lock_sha256: digest(include_bytes!("../../../Cargo.lock")),
+        }
+    }
+    fn validate(&self) -> Result<()> {
+        if self.version != 1 {
+            return Err(Error::Version);
+        }
+        if ![16, 32, 64, 128].contains(&self.pointer_width)
+            || !["little", "big"].contains(&self.endian.as_str())
+            || [
+                &self.os,
+                &self.arch,
+                &self.core_version,
+                &self.numeric_model,
+            ]
+            .iter()
+            .any(|s| s.is_empty() || s.len() > 128 || !s.bytes().all(|c| c.is_ascii_graphic()))
+            || self.cargo_lock_sha256.len() != 64
+            || !self
+                .cargo_lock_sha256
+                .bytes()
+                .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+        {
+            return Err(Error::Invalid("reproduction environment".into()));
+        }
+        Ok(())
+    }
+    fn differences(&self, other: &Self) -> Vec<&'static str> {
+        let mut differences = vec![];
+        macro_rules! check { ($($field:ident),*) => { $(if self.$field != other.$field { differences.push(stringify!($field)); })* }; }
+        check!(
+            os,
+            arch,
+            pointer_width,
+            endian,
+            core_version,
+            numeric_model,
+            cargo_lock_sha256
+        );
+        differences
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -65,6 +138,10 @@ pub struct Report {
     pub recorded_engine: String,
     pub current_engine: String,
     pub engine_matches: bool,
+    pub recorded_environment: Option<Environment>,
+    pub current_environment: Environment,
+    pub environment_status: &'static str,
+    pub environment_differences: Vec<&'static str>,
     pub reproduced: bool,
     pub matched: usize,
     pub errors_reproduced: usize,
@@ -201,6 +278,7 @@ pub fn capture(p: &Project) -> Result<Package> {
                 })
             })
             .collect::<Result<_>>()?,
+        environment: Some(Environment::current()),
     };
     let sha256 = digest(&serde_json::to_vec(&payload)?);
     let package = Package {
@@ -233,6 +311,9 @@ pub fn from_bytes(bytes: &[u8]) -> Result<Package> {
 fn validate_header(p: &Package) -> Result<()> {
     if p.version != 1 || p.format != "symbio.reproduction" {
         return Err(Error::Version);
+    }
+    if let Some(environment) = &p.payload.environment {
+        environment.validate()?;
     }
     if p.payload.cells.len() > 128
         || p.payload.assumptions.len() > 64
@@ -314,6 +395,9 @@ fn fresh(p: &Payload) -> Result<Project> {
     Ok(project)
 }
 pub fn verify(package: &Package) -> Result<Report> {
+    verify_with_cas(package, false)
+}
+pub fn verify_with_cas(package: &Package, allow_cas: bool) -> Result<Report> {
     validate_header(package)?;
     // No captured SEG/cache, filesystem path, command text or audit events are executed.
     let mut project = fresh(&package.payload)?;
@@ -341,6 +425,17 @@ pub fn verify(package: &Package) -> Result<Report> {
             result_text: None,
             result_preview_omitted: false,
         };
+        if original
+            .calculation
+            .as_ref()
+            .is_some_and(|p| matches!(p.operation.as_str(), "factor" | "solve_polynomial"))
+            && !allow_cas
+        {
+            row.differences.push("external_runtime");
+            skipped += 1;
+            rows.insert(id, row);
+            continue;
+        }
         if let Some(plan) = &original.calculation
             && (original.expected.output.is_some() || original.expected.error.is_some())
         {
@@ -441,7 +536,25 @@ pub fn verify(package: &Package) -> Result<Report> {
         }
         rows.insert(id, row);
     }
+    let current_environment = Environment::current();
+    let environment_differences = package
+        .payload
+        .environment
+        .as_ref()
+        .map(|e| e.differences(&current_environment))
+        .unwrap_or_default();
+    let environment_status = if package.payload.environment.is_none() {
+        "unrecorded"
+    } else if environment_differences.is_empty() {
+        "matched"
+    } else {
+        "different"
+    };
     Ok(Report {
+        recorded_environment: package.payload.environment.clone(),
+        current_environment,
+        environment_status,
+        environment_differences,
         document: package.payload.document.clone(),
         branch: package.payload.branch.clone(),
         revision: package.payload.revision,

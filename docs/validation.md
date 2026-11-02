@@ -207,3 +207,94 @@ Target flow: Structure & history → MathJSON → export selected definition / i
 Validation used `cua_repl` for native child WebViews and dialogs. The Browser skill is not installed, and static browser preview cannot exercise this workflow. Screenshot: `/private/tmp/symbio-mathjson-matrix-ja.jpg`.
 
 The matrix product roundtrip exposed a pre-existing serializer bug: emitted LaTeX used a single row separator instead of the required double separator. The serializer now emits the correct delimiter, and roundtrip/determinant tests pass. Full MathJSON/OpenMath compatibility, non-ASCII identifiers, approximate literal provenance, calculus exchange, Windows/Linux and long-running large exchange inputs remain unimplemented or untested.
+
+## Shared-coordinate 3D surface comparison (2026-11-01)
+
+Target flow: 3D tab → layers popover → select another cell → inspect shared-axis surfaces/legend → add an unsupported cell → remove only its warning layer.
+
+- **132 Rust tests passed** (77 core, 55 desktop). Eight new renderer/axis cases cover selection limits/duplicates/branch IDs, separated constant planes, one shared scale, small nonzero heights, individual failures, assumptions/holes/ranges, single-surface compatibility and generation/comparison frame stamps.
+- **19 JavaScript tests passed**, including two axis-frame validity cases covering document changes, comparison membership, revision, camera/ranges, height extents and hidden/working states. Syntax checks and Clippy with warnings denied passed; unsigned development bundle built. Existing `block 0.1.6` future compatibility notice remains.
+- Mesh data stays in Rust/GPU memory. View-state tests confirm geometry buffers are not serialized into WebView state.
+
+| Native macOS check | Result |
+| --- | --- |
+| Identity/content | Passed: native Symbio 3D panel, localized layers popover, meaningful GPU geometry and numeric axis labels. |
+| Two surfaces | Passed: `sin(x) cos(y)` and `(x²+y²)/4−1`, shared x/y `[-2,2]`, common z `[-1,1]`, blue/orange legend and `2/2 · 8450` valid samples. |
+| Partial failure | Passed: adding `z=x+t` preserved both valid surfaces and showed a warning on the unsupported cell; footer showed `2/3`. |
+| Legend removal | Passed: removing only the warning cell returned to `2/2`, without changing research revision 5 or save status. |
+| Camera | Passed: keyboard rotation retained both surfaces and shared axes. |
+| Save As context | Passed: new temporary copy retained research revision 5, reset comparison selection and returned to one 4225-sample surface. Original/copy project bytes were identical. |
+| Final popover/keyboard | Passed: compact checkbox/name spacing in final build; Escape closed the popover. |
+| Visual health | Passed at observed 1280×800 and enlarged 1430×1080: readable controls/legend, no visible overlay or overlapping formula/mesh viewport. |
+| Original workspace | Restored saved graph-edit-demo revision 59 and its notebook view; mathematical content was not edited. |
+| Runtime console | Native UI automation does not expose JS console logs. Syntax checks and actual IPC/GPU interactions passed. |
+
+Native checks used `cua_repl`, since GPU surfaces and child WebViews cannot be validated by a static browser preview. The Browser skill is not installed. Screenshot evidence: `/private/tmp/symbio-surface-comparison-ja.jpg`.
+
+Uniform 65×65 sampling, solid-surface occlusion and float64 uncertainty remain limitations. Adaptive sampling, scientific figure export, Windows/Linux, device loss, large/long sessions, and live formula/assumption edits while a comparison remains open were not separately exercised in this native pass. Their shared sampling semantics are covered by Rust cases. Comparison is a temporary current-branch viewport configuration, not stored research history.
+
+## 2026-11-01 · Optional local CAS factorization
+
+Flow under test: Structure & history → configure existing local Python/SymPy → open a temporary polynomial document → factor from the notebook → see typeset factors and bounded symbolic evidence → save the temporary document and return to the original.
+
+- `cargo test --locked --offline -p symbio-core -p symbio-cli -p symbio-desktop`: **137 passed** (82 core, 55 desktop). Added exact product validation, malformed/fabricated responses, input bounds, unsupported scope, worker timeout/termination and invalid transport tests.
+- `cargo clippy --locked --offline -p symbio-core -p symbio-cli -p symbio-desktop --all-targets -- -D warnings`, `cargo fmt --all --check`, JavaScript syntax checks and `git diff --check`: passed. Existing dependency future-compatibility notice for `block 0.1.6` remains.
+- `node --test scripts/*.test.mjs`: **19 passed**.
+- `python3 scripts/smoke-cas.py`: real isolated local Python/SymPy 1.14.0 transport passed for rational coefficients, repeated factors, irreducible quadratic, zero/constants, recorded recipes, reference-dependent recalculation, Undo/Redo, clearing failed outputs, unsupported multivariate/variable-denominator inputs, default skipped external replay, explicit successful replay and unavailable-runtime replay errors.
+- `python3 scripts/smoke-reproduction.py`: existing Rust-only replay, checksum rejection, immutable source, no-clobber and changed expected-result detection passed.
+- `python3 scripts/build-dev-app.py`: native development bundle built successfully.
+- Browser plugin/skill is not available in this session. Native CUA was used because the target is the actual Tauri child-WebView application, including application-owned preferences and native file dialogs. GUI confirmed disabled factor action before configuration, a successful `SymPy 1.14.0` probe, and `x^4 - 1 → (x − 1) · (x + 1) · (x² + 1)` with **Symbolic** status and Rust coefficient-check condition. Screenshot inspection confirmed the three-column layout and readable MathML result. Only a temporary document was modified/saved; the original returned to saved revision 59.
+
+Limits: this is not a general CAS conformance benchmark, formal proof, independent irreducibility check, or OS sandbox. General equation/integration adapters remain unfinished. External replay was exercised through the real CLI; native package-picker replay of this operation and other operating systems have not been exercised in this environment.
+
+## 2026-11-01 · MathJSON calculus exchange
+
+Flow under test: Structure & history → MathJSON import → select the calculus example → inspect the authored definite integral and exact result → save the test document and return to the original.
+
+- `cargo test --locked --offline -p symbio-core -p symbio-cli -p symbio-desktop`: **143 passed** (87 core, 56 desktop). MathJSON now has 14 tests, including calculus decoding/encoding, exact results, authored binders rather than cached outputs, nested scope, free variables in limits, context preservation, object forms, invalid arities/shapes/variables, bounded evaluation and scope-safe LaTeX operands. Dock tests cover the selected tab in docked and floating groups.
+- `python3 scripts/smoke-mathjson.py`: CLI import/export/reimport passed for derivatives, integrals, finite sums/products, exact large numbers, explicit assumptions, immutable inputs and no-clobber destinations.
+- `cargo clippy --locked --offline -p symbio-core -p symbio-cli -p symbio-desktop --all-targets -- -D warnings`, `cargo fmt --all --check`, JavaScript syntax check, and `git diff --check`: passed. The existing `block 0.1.6` future-compatibility notice remains.
+- `node --test scripts/*.test.mjs`: **19 passed**. Native development bundle rebuilt successfully.
+- Browser plugin/skill is not available. Native CUA tested the actual Tauri child-WebViews and native import/save dialogs. `examples/calculus.mathjson.json` imported into a separate untitled document and displayed `∫₀² x² dx` and exact `8/3` in MathML. Screenshot inspection confirmed readable notation and the three-column layout. GUI QA exposed untranslated calculus kind labels and a redundant notebook-selection warning after import; both were fixed and the same native import flow was rerun successfully with “積分” and ready status. English/Japanese/Simplified Chinese labels and tooltips were updated.
+- The original research document was not edited and returned to its saved revision 62. Test documents alone were saved; one initial test filename was saved under application support, and the final test was saved under `/private/tmp/symbio-mathjson-calculus-gui-20261101.symbio`.
+
+This extends exchange support, not general integration/differentiation algorithms. Approximate literals, implicit binders, infinite limits and functional `Derivative` remain rejected. Native export of the new binders was not separately exercised; CLI export/reimport and core structure roundtrips passed. Windows/Linux native validation remains pending.
+
+## 2026-11-02 · Exporter kernel environment manifest
+
+Flow under test: Structure & history → Reproduction → open a test package → inspect result replay and separate kernel-environment status → expand the exporter/verifier comparison table.
+
+- `cargo test --locked --offline -p symbio-core -p symbio-cli -p symbio-desktop`: **147 passed** (91 core, 56 desktop). Added manifest capture/roundtrip, environment-only differences with matching mathematical replay, legacy checksum compatibility, unknown/oversized/malformed metadata, checksum tampering and unsupported manifest-version tests.
+- `python3 scripts/smoke-reproduction.py`: real CLI verified matching exporter fields, a resealed synthetic OS difference without result mismatch, legacy packages without manifests, immutable source/no-clobber writes and existing checksum/result-mismatch behavior.
+- `cargo clippy --locked --offline -p symbio-core -p symbio-cli -p symbio-desktop --all-targets -- -D warnings`, formatting, JavaScript syntax and diff whitespace checks passed. Existing `block 0.1.6` future-compatibility notice remains.
+- `node --test scripts/*.test.mjs`: **19 passed**. Development app bundle rebuilt.
+- Browser plugin/skill is not available; native CUA exercised the actual Tauri child-WebViews and package picker. A temporary package with a synthetic `different-os` exporter value showed **replay matched** for two cells, **kernel fields differ**, and the comparison table's highlighted `different-os → macos` row. Real local OS/CPU targets and lockfile digests were shown as text. The synthetic difference tests reporting, not cross-platform execution. English, Japanese and Simplified Chinese labels/tooltips were added. Environment details reuse the existing disclosure state preservation.
+- The read-only verification initially left the research document saved at revision 62 with the same selected surface cell. Subsequent external UI interaction produced new unsaved changes at revision 66 and selected the 3D tab; these changes were left untouched, and no further restart or save was attempted. Verification itself did not add a session document, change its save destination or execute external CAS. Test packages were created under `/private/tmp/symbio-environment-20261102`.
+- The final small disclosure-state persistence change passed syntax/build checks; a native restart to recheck that detail was deferred to avoid disturbing the newly unsaved edits. The table and separate statuses were already verified in the preceding native flow.
+
+The manifest describes the exporting build's bounded fields. It is not a full original-calculation environment, compiler/source/binary fingerprint, environment restore facility, digital signature or mathematical proof. Windows/Linux native validation and full environment capture remain pending.
+
+## 2026-11-02 · Stateless local MCP tools
+
+Flow under test: launch the real CLI subprocess in MCP mode → initialize and notify ready → discover schemas → request independent calculations/previews → inspect structured evidence → reject document/CAS authority → terminate cleanly on EOF or an oversized frame.
+
+- `cargo test --locked --offline -p symbio-core -p symbio-cli -p symbio-desktop`: **151 passed** (4 MCP CLI, 91 core, 56 desktop). New tests cover lifecycle gating, notifications, invalid JSON-RPC IDs/methods/cursors, exact calculus, assumption isolation, approximation trust, SEG inspection, preview, error codes, forbidden fields/CAS operations and framing limits.
+- `python3 scripts/smoke-mcp.py`: independent real stdio client passed. Python JSON Schema validation checked both advertised schemas and structured success/error results; serialized text and structured content matched. Exact integral, assumption-sensitive simplification, fresh-call isolation, numeric evidence, matrix LaTeX preview, parse/domain/reference errors, rejected authority and clean EOF were exercised. An inherited fake CAS executable was not run, and the scratch working directory was not changed. Oversized input terminated with stderr and no protocol pollution.
+- `CARGO_NET_OFFLINE=true python3 scripts/smoke-cli.py`: previous project-based JSONL CLI behavior, persistence, actor attribution, conflict/parse rollback and LaTeX handling passed after adding the separate MCP entry point.
+- `cargo clippy --locked --offline -p symbio-core -p symbio-cli -p symbio-desktop --all-targets -- -D warnings`, formatting and diff checks passed. Existing dependency future-compatibility notice for `block 0.1.6` remains.
+
+No GUI was changed or restarted; ongoing user edits were left alone. This is a local synchronous stdio subset, not an HTTP server, project mutation channel, natural-language planner, full MCP ecosystem certification or general CAS gateway. Third-party MCP host integration, cancellation/progress and permission-bound notebook proposals remain pending. No client configuration or packages were automatically installed. The Python jsonschema package is only a locally available validation dependency, not a runtime requirement.
+
+## 2026-11-02 · Exact high-degree real polynomial solving
+
+Flow under test: explicit LaTeX equation → configured local factor worker → independent exact coefficient-product check → Rust linear/quadratic solving of every factor → complete real solution set or an unsupported error → dependency replay and saved reproduction.
+
+- `cargo test --locked --offline -p symbio-core -p symbio-cli -p symbio-desktop`: **156 passed** (96 core, 4 MCP CLI, 56 desktop). New core cases cover exact radical roots, proportional-factor normalization, root deduplication, empty real sets, nonzero constants, identity rejection, sign filtering and unsupported irrational sign filtering, zero roots, incomplete/incorrect factor rejection and the bounded 32-entry persisted solution capacity.
+- `python3 scripts/smoke-cas-solve.py`: actual local SymPy 1.14.0 passed for quartic/sextic equations, repeated factors, four exact irrational roots, zero roots, and 32 distinct rational roots at the degree limit. Residual cubic/quartic factors, variable denominators, identities and extra symbols were rejected without publishing partial roots. CLI transactions rolled back failed operations; reference/source and assumption edits, Undo/Redo, stale-output clearing, save/cache reload, default skipped external replay, explicit successful replay and unavailable-runtime errors passed.
+- `python3 scripts/smoke-cas.py`: previous factorization behavior and recipe/reproduction regression passed after sharing its bounded worker protocol with solving.
+- `python3 scripts/smoke-mcp.py`: stateless MCP lifecycle, schema/evidence and authority isolation regression passed. The new external operation is not exposed through MCP.
+- `cargo clippy --locked --offline -p symbio-core -p symbio-cli -p symbio-desktop --all-targets -- -D warnings`, formatting, JavaScript syntax and diff checks passed. `node --test scripts/*.test.mjs`: **19 passed**. The existing `block 0.1.6` future-compatibility notice remains. Native development bundle rebuilt; engine identifier is now `symbio-rust/0.7.0`.
+- GUI source adds a separate equation action `x = ? · CAS`, disabled until a local interpreter is configured, and updates the glyph when the chosen variable changes. Operation/evidence labels and CAS scope tooltips support English, Japanese and Simplified Chinese.
+- Native CUA inspected the running application before attempting GUI QA and found **unsaved revision 66**. No restart, save, document switch or calculation was performed in that application. The new native button/visual flow is **pending**, to preserve ongoing work; backend, real CAS, CLI, persistence and replay are verified. No new rendered-UI success is claimed.
+
+This is not unrestricted polynomial root isolation, arbitrary equation solving or a formal proof. Every rational factor must have degree one or two; higher-degree residual factors reject the whole operation. Root multiplicities are not returned. The existing offline quadratic solver and stateless MCP authority remain unchanged. Complete root-list formatting and native controls still require the pending GUI pass.

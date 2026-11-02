@@ -107,3 +107,27 @@ Desktop file operations run on a blocking worker with native dialogs, generation
 `mathjson` maps a strict standard-library subset into SEG and back in Rust. The exchange envelope retains explicit assumptions while its `expression` member uses standard MathJSON values. Export resolves authored references, bounds expanded conversion and validates representability in the notebook source format. Import rebuilds generated LaTeX into a fresh AppCore and reuses normal computation; it never adopts foreign results or mutates the existing document's assumptions. Unsupported objects, ambiguous approximate numbers and metadata are rejected rather than stringified or silently ignored.
 
 Desktop exchange uses native file guards and no-clobber writes. Import adds a separate untitled Rust-owned session document and reveals the notebook; generation checks protect against old-document actions. The MathJSON matrix roundtrip also exposed and fixed a pre-existing LaTeX serializer row-delimiter bug. OpenMath and a general CAS runtime are not part of this adapter.
+
+## Shared-coordinate 3D comparison
+
+The Rust-owned `Surface3d` state holds a primary cell and up to three comparison IDs. A renderer worker captures graph/assumptions once, samples each layer independently, combines valid meshes using the union of their z extents, applies identity colors and uploads a single retained GPU mesh. Shared grid geometry is emitted once. Flat layers retain their absolute height in the combined scale; nonzero spans are not flattened by an arbitrary epsilon. Each layer has its own status and sample/height metadata. No mesh, sample arrays or frames are transferred to JavaScript.
+
+Commands validate document generation and revision under the session lock. Sampling tickets discard superseded jobs; worker input generation must match the requested view context. A new file or Save As invalidates the temporary comparison configuration. Save As now refreshes the renderer's context after releasing the session lock. Axis projection frames include generation and comparison IDs in addition to revision, ranges, orbit and z extents. The WebView discards mismatching frames. Rendering is hidden during resampling rather than displaying an old mesh under new axes.
+
+The interface adds a bounded checkbox popover in the existing controls row and a small in-scene legend. Its controls stop pointer propagation to camera gestures. The native GPU viewport dimensions therefore stay unchanged. Opaque depth-tested rendering means surfaces can occlude each other; transparency, adaptive sampling and scientific figure export are separate future work.
+
+## Optional CAS boundary
+
+The Rust core owns the bounded coefficient-vector protocol and independent exact identity check. The desktop owns application-wide interpreter preferences, probes on explicit Apply, and emits settings snapshots to WebViews. Documents cannot configure executables. The embedded worker runs outside the WebView with timeout and output bounds. External reproduction is disabled by default and requires explicit opt-in. See [CAS](cas.md).
+
+Calculus exchange maps explicit `D`, `Integrate`, `Sum` and `Product` into existing SEG operators. Generated LaTeX groups entire binders so adjacent operations cannot be captured into their bodies. Bounds and variable names remain separate from the body, and computation keeps the Rust kernel’s existing bounded contract.
+
+## Reproduction environment metadata
+
+The core embeds Cargo.lock bytes at compile time and hashes them when capturing/verifying reproduction packages, together with compile-target constants and the core numeric policy. No subprocess, network request, path enumeration or host identity is needed. Optional manifest serialization omits absent fields to preserve legacy v1 checksum bytes. Validation bounds the manifest before replay. Report environment differences remain distinct from result evidence, and the WebView receives only the structured read-only report.
+
+## Stateless MCP process
+
+The CLI's `mcp` entry point owns a local synchronous JSON-RPC lifecycle and serves two bundled tool schemas. Each calculation creates a fresh Rust AppCore, applies bounded assumptions/source/transformation commands with AI attribution, and returns cell evidence plus reachable SEG inspection. No ProjectStore, shared desktop session, executable settings or network listener is opened. Tool operation allowlisting excludes external CAS even when its interpreter is configured in the environment. Numeric bindings require explicit evaluation. Protocol/shape errors and kernel computation errors use separate MCP error paths. The original project-based JSONL entry point is retained.
+
+The optional `solve_polynomial` path reuses the same numeric-only CAS factor worker. Rust verifies the complete product identity, normalizes each factor to monic form, invokes its own real linear/quadratic solver, and combines unique roots. Unsupported higher-degree residual factors fail the transaction instead of publishing partial roots. The SEG persisted Solutions capacity is bounded at 32, matching the supported polynomial degree. Saved calculation recipes and external-replay permission gating cover both factorization and polynomial solving.

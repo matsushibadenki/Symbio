@@ -95,6 +95,9 @@ impl Session {
             documents: self.documents(),
         }
     }
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
     pub fn check_generation(&self, generation: u64) -> Result<(), UiError> {
         if generation == self.generation {
             Ok(())
@@ -336,6 +339,8 @@ pub async fn save_as(
         remember(&app, session.path().expect("saved document"));
         let out = session.snapshot();
         let _ = app.emit("symbio://changed", &out);
+        drop(session);
+        super::surface3d::refresh(&app);
         Ok(Some(out))
     })
     .await
@@ -984,6 +989,7 @@ pub async fn export_reproduction(
 pub async fn verify_reproduction(
     webview: tauri::Webview,
     generation: u64,
+    allow_cas: bool,
 ) -> Result<Option<symbio_core::reproduction::Report>, UiError> {
     authorize(&webview)?;
     let app = webview.app_handle().clone();
@@ -1012,7 +1018,10 @@ pub async fn verify_reproduction(
             return Ok(None);
         };
         let path = file.into_path().map_err(|_| error("io_error"))?;
-        let report = symbio_core::reproduction::verify(&symbio_core::reproduction::read(path)?)?;
+        let report = symbio_core::reproduction::verify_with_cas(
+            &symbio_core::reproduction::read(path)?,
+            allow_cas,
+        )?;
         app.state::<Shared>()
             .0
             .lock()

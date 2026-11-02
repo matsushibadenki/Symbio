@@ -442,6 +442,12 @@ impl LayoutState {
             })
             && panels == self.floating.iter().copied().collect()
     }
+    /// Whether the panel is already the selected tab in its docked or floating host.
+    pub fn selected(&self, p: Panel) -> bool {
+        self.root.as_ref().and_then(|n| active_tab(n, p)) == Some(p)
+            || self.floating_group(p).is_some_and(|g| g.active == p)
+            || (self.floating.contains(&p) && self.floating_group(p).is_none())
+    }
     pub fn floating_group(&self, p: Panel) -> Option<&FloatingGroup> {
         self.floating_groups.iter().find(|g| g.panels.contains(&p))
     }

@@ -173,7 +173,9 @@
                 "solve",
                 "determinant",
                 "inverse",
-                "transpose"
+                "transpose",
+                "factor",
+                "solve_polynomial"
               ]
             },
             "variable": {

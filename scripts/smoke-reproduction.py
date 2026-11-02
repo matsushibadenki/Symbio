@@ -17,10 +17,25 @@ with tempfile.TemporaryDirectory(prefix="symbio-reproduction-") as directory:
     subprocess.run([str(CLI), "export-reproduction", str(source), str(package)], check=True, capture_output=True)
     report = json.loads(subprocess.run([str(CLI), "verify-reproduction", str(package)], check=True, capture_output=True, text=True).stdout)
     assert report["reproduced"] and report["matched"] == 2
+    assert report["environment_status"] == "matched" and not report["environment_differences"]
+    assert len(report["current_environment"]["cargo_lock_sha256"]) == 64
     assert source.read_bytes() == source_before
     package_before = package.read_bytes()
     assert subprocess.run([str(CLI), "export-reproduction", str(source), str(package)], capture_output=True).returncode != 0
     assert package.read_bytes() == package_before
+    # A foreign environment is metadata, never an instruction to install or run software.
+    changed = json.loads(package_before)
+    changed["payload"]["environment"]["os"] = "different-os"
+    changed["sha256"] = hashlib.sha256(json.dumps(changed["payload"], ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+    package.write_text(json.dumps(changed))
+    foreign = json.loads(subprocess.run([str(CLI), "verify-reproduction", str(package)], check=True, capture_output=True, text=True).stdout)
+    assert foreign["reproduced"] and foreign["environment_status"] == "different"
+    assert foreign["environment_differences"] == ["os"]
+    del changed["payload"]["environment"]
+    changed["sha256"] = hashlib.sha256(json.dumps(changed["payload"], ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+    package.write_text(json.dumps(changed))
+    legacy = json.loads(subprocess.run([str(CLI), "verify-reproduction", str(package)], check=True, capture_output=True, text=True).stdout)
+    assert legacy["reproduced"] and legacy["environment_status"] == "unrecorded"
     altered = json.loads(package_before)
     altered["payload"]["cells"][0]["source"] = "x^2"
     package.write_text(json.dumps(altered))
@@ -36,4 +51,4 @@ with tempfile.TemporaryDirectory(prefix="symbio-reproduction-") as directory:
     assert result.returncode != 0
     report = json.loads(result.stdout)
     assert not report["reproduced"] and report["mismatched"] == 1
-print("PASS: export/replay, immutable source, no-clobber, checksum rejection and recomputed-result mismatch")
+print("PASS: environment match/difference/legacy replay, export/replay, immutable source, no-clobber, checksum rejection and recomputed-result mismatch")

@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 pub type Id = usize;
 pub type Rational = BigRational;
 pub const MAX_NODES: usize = 16000;
+pub const MAX_SOLUTIONS: usize = 32;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(
     tag = "op",
@@ -194,7 +195,9 @@ impl Graph {
                 {
                     return Err(Error::Invalid("matrix shape".into()));
                 }
-                Node::Solutions { values, .. } if values.len() > 2 => return Err(Error::Limit),
+                Node::Solutions { values, .. } if values.len() > MAX_SOLUTIONS => {
+                    return Err(Error::Limit);
+                }
                 _ => {}
             }
             if self.index.insert(n.clone(), i).is_some() {

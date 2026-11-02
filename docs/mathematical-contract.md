@@ -1,6 +1,6 @@
 # Mathematical contract
 
-Symbio is a reproducible derivation notebook with a bounded Rust symbolic kernel. It is not a complete Mathematica implementation. External CAS adapters are planned; SymPy currently serves only as an optional development oracle.
+Symbio is a reproducible derivation notebook with a bounded Rust symbolic kernel. It is not a complete Mathematica implementation. An optional local SymPy adapter supports exact rational univariate polynomial factorization, with independent Rust coefficient-identity checking. General CAS operations remain planned. See [the CAS contract](cas.md).
 
 ## Operations and evidence
 
@@ -31,3 +31,7 @@ Integral syntax recognizes its differential and bound variable. Outside that syn
 The runtime uses exact rational arithmetic and a limited set of symbolic, matrix, integral and equation algorithms. Arbitrary precision floating point, interval arithmetic, general integration, tensor/noncommutative algebra, formal proof checking and scientific figure export remain future work. Engine errors are preferable to guessed results.
 
 `cargo test -p symbio-core -p symbio-desktop --offline` includes regression tests for partial substitution, singularities, assumptions, references, recipe replay, equations and calculus ordering. `python3 scripts/smoke-research-contract.py` optionally checks six bounded cases against locally installed SymPy. This is not a general CAS benchmark, Rubi conformance result or validation of the advanced physics problems proposed in the feedback.
+
+## Optional high-degree real polynomial solve
+
+The external `solve_polynomial` operation supports explicit rational univariate equations up to degree 32 only when their factorization has no factor above degree two. Rust independently checks the factor-product coefficient identity and uses its existing exact linear/quadratic solver on every factor. It rejects unsupported residual factors instead of returning a partial solution set. Sign/nonzero filtering of irrational roots remains unsupported. This extends the optional CAS path; the offline quadratic solve contract remains unchanged. See [CAS contract](cas.md).
