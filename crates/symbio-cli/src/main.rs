@@ -12,18 +12,38 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if args.as_slice() == ["mcp"] {
         return mcp::serve(io::stdin().lock(), io::stdout().lock());
     }
-    if args.first().is_some_and(|s| s == "export-mathjson") && args.len() == 3 {
+    if args
+        .first()
+        .is_some_and(|s| matches!(s.as_str(), "export-mathjson" | "export-openmath"))
+        && args.len() == 3
+    {
         let mut store = ProjectStore::open(&args[1])?;
         let core = AppCore::new(store.load()?.ok_or("project not found")?)?;
         let id = core.project().current().selected.ok_or("select a cell")?;
-        symbio_core::mathjson::write_new(
-            &args[2],
-            &symbio_core::mathjson::export(core.project(), id)?,
-        )?;
+        if args[0] == "export-openmath" {
+            symbio_core::openmath::write_new(
+                &args[2],
+                &symbio_core::openmath::export(core.project(), id)?,
+            )?;
+        } else {
+            symbio_core::mathjson::write_new(
+                &args[2],
+                &symbio_core::mathjson::export(core.project(), id)?,
+            )?;
+        }
         return Ok(());
     }
-    if args.first().is_some_and(|s| s == "import-mathjson") && args.len() == 3 {
-        let mut core = symbio_core::mathjson::import(&symbio_core::mathjson::read(&args[1])?)?;
+    if args
+        .first()
+        .is_some_and(|s| matches!(s.as_str(), "import-mathjson" | "import-openmath"))
+        && args.len() == 3
+    {
+        let bytes = symbio_core::mathjson::read(&args[1])?;
+        let mut core = if args[0] == "import-openmath" {
+            symbio_core::openmath::import(&bytes)?
+        } else {
+            symbio_core::mathjson::import(&bytes)?
+        };
         let mut store = ProjectStore::open(&args[2])?;
         if store.load()?.is_some() {
             return Err("destination exists".into());
@@ -55,7 +75,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     if args.len() != 2 || !["init", "inspect", "serve"].contains(&args[0].as_str()) {
-        return Err("usage: symbio-cli mcp | import-mathjson JSON NEW_PROJECT | export-mathjson PROJECT JSON | init|inspect|serve PROJECT | export-reproduction PROJECT PACKAGE | verify-reproduction PACKAGE [--allow-cas]".into());
+        return Err("usage: symbio-cli mcp | import-openmath XML NEW_PROJECT | export-openmath PROJECT XML | import-mathjson JSON NEW_PROJECT | export-mathjson PROJECT JSON | init|inspect|serve PROJECT | export-reproduction PROJECT PACKAGE | verify-reproduction PACKAGE [--allow-cas]".into());
     }
     let mut store = ProjectStore::open(&args[1])?;
     let project = match store.load()? {

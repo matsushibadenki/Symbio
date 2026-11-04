@@ -158,3 +158,9 @@ Reproduction reports additionally expose `recorded_environment`, `current_enviro
 `symbio-cli mcp` is a separate stateless JSON-RPC entry point. It exposes `math_calculate` and `math_preview_latex`, with schemas in [mcp-tools.json](mcp-tools.json). It does not accept the JSONL project-mutation envelope or touch desktop state. See [protocol and permissions](mcp.md).
 
 `math.transform` also accepts `solve_polynomial`: an explicit univariate rational polynomial equation of total degree ≤32, with a configured local CAS. Rust checks the factorization identity, then solves all linear/quadratic factors exactly over the reals. Any higher-degree residual factor rejects the whole operation. Results remain Symbolic; default reproduction skips the recipe unless external CAS is allowed. See [solver limits](cas.md). This operation is not included in the stateless MCP tool allowlist.
+
+## OpenMath XML exchange
+
+`openmath::export(&Project, cell_id)` returns bounded XML bytes; `openmath::import(bytes)` creates a fresh AppCore through the existing exact exchange/source/calculation path. `write_new` persists bytes without replacing an existing destination. CLI `export-openmath PROJECT XML` and `import-openmath XML NEW_PROJECT` expose the same codec. Existing desktop exchange commands accept optional `format: "openmath"` (`mathjson` remains the default), with the same authorization, draft and generation/revision guards. See [OpenMath contract](openmath.md).
+
+Exact exchange now includes unary matrix `Determinant` / `Transpose` in MathJSON and `linalg1.determinant` / `linalg1.transpose` in OpenMath. Both codecs preserve authored operators and use the shared SEG shape checks and exact Rust evaluator. Other OpenMath matrix arithmetic remains unsupported.

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OMOBJ xmlns="http://www.openmath.org/OpenMath" version="2.0">
+  <OMA>
+    <OMS cd="arith1" name="plus"/>
+    <OMI>9007199254740993</OMI>
+    <OMA><OMS cd="nums1" name="rational"/><OMI>1</OMI><OMI>3</OMI></OMA>
+  </OMA>
+</OMOBJ>

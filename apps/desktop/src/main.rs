@@ -136,25 +136,36 @@ async fn reveal_notebook(
     authorize(&webview)?;
     let app = webview.app_handle().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        app.state::<Shared>()
-            .0
-            .lock()
-            .map_err(|_| error("internal_error"))?
-            .check_generation(generation)?;
-        let layout = app.state::<workspace::Workspace>().snapshot();
-        // Native file-dialog focus changes can briefly occupy the dock controller.
-        // Do not perform a layout mutation when the destination is already selected.
-        if layout.selected(layout::Panel::Notebook) {
-            return Ok(layout);
+        // Dialog focus/resize events may briefly occupy the native dock controller.
+        // Retry this explicit reveal request, checking document ownership each time.
+        for attempt in 0..50 {
+            app.state::<Shared>()
+                .0
+                .lock()
+                .map_err(|_| error("internal_error"))?
+                .check_generation(generation)?;
+            let layout = app.state::<workspace::Workspace>().snapshot();
+            if layout.selected(layout::Panel::Notebook) {
+                return Ok(layout);
+            }
+            match workspace::execute(
+                &app,
+                layout::Command::Select {
+                    panel: layout::Panel::Notebook,
+                },
+                layout.revision,
+            ) {
+                Ok(layout) => return Ok(layout),
+                Err(e)
+                    if attempt < 49
+                        && matches!(e.code.as_str(), "panel_busy" | "layout_conflict") =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(20))
+                }
+                Err(e) => return Err(e),
+            }
         }
-        let revision = layout.revision;
-        workspace::execute(
-            &app,
-            layout::Command::Select {
-                panel: layout::Panel::Notebook,
-            },
-            revision,
-        )
+        Err(error("panel_busy"))
     })
     .await
     .map_err(|_| error("internal_error"))?

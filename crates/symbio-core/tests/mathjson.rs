@@ -375,3 +375,90 @@ fn binder_operands_do_not_capture_surrounding_operations_in_generated_latex() {
         Some("(3 * x)")
     );
 }
+
+#[test]
+fn determinant_and_transpose_preserve_authored_matrix_operations() {
+    let m = json!(["List", ["List", 1, 2], ["List", 3, 4]]);
+    for v in [
+        json!(["Determinant", m]),
+        json!(["Transpose", m]),
+        json!(["Determinant", ["Transpose", m]]),
+        json!(["Transpose", ["Transpose", m]]),
+        json!(["Transpose", ["List", ["List", 1, 2, 3], ["List", 4, 5, 6]]]),
+    ] {
+        let c = load(v);
+        let e = export(c.project(), 1).unwrap();
+        let copy = import(&to_bytes(&e).unwrap()).unwrap();
+        assert_eq!(e.expression, export(copy.project(), 1).unwrap().expression);
+        assert_eq!(
+            c.snapshot().cells[0].result_text,
+            copy.snapshot().cells[0].result_text
+        );
+        assert!(copy.snapshot().cells[0].cell.output.is_some());
+    }
+    assert_eq!(
+        load(json!(["Determinant", m])).snapshot().cells[0]
+            .result_text
+            .as_deref(),
+        Some("-2")
+    );
+    assert_eq!(
+        load(json!([
+            "Determinant",
+            ["List", ["List", 1, 2], ["List", 2, 4]]
+        ]))
+        .snapshot()
+        .cells[0]
+            .result_text
+            .as_deref(),
+        Some("0")
+    );
+    for v in [
+        json!(["Determinant", 5]),
+        json!(["Transpose", "x"]),
+        json!(["Determinant", ["List", ["List", 1, 2, 3]]]),
+        json!(["Transpose", m, 1, 2]),
+        json!(["Determinant", m, 0]),
+        json!(["ConjugateTranspose", m]),
+        json!(["Inverse", m]),
+    ] {
+        assert!(import(&serde_json::to_vec(&v).unwrap()).is_err(), "{v}");
+    }
+}
+
+#[test]
+fn matrix_exchange_results_have_independently_checked_entries_and_rationals() {
+    let c = load(json!([
+        "Transpose",
+        ["List", ["List", 1, 2, 3], ["List", 4, 5, 6]]
+    ]));
+    let root = c.project().current().cells[0]
+        .output
+        .as_ref()
+        .unwrap()
+        .root
+        .unwrap();
+    let graph::Node::Matrix {
+        rows,
+        cols,
+        entries,
+    } = &c.project().graph.nodes[root]
+    else {
+        panic!("matrix result required")
+    };
+    assert_eq!((*rows, *cols), (3, 2));
+    let values: Vec<_> = entries
+        .iter()
+        .map(|&id| graph::rat_text(&c.project().graph.value(id).unwrap()))
+        .collect();
+    assert_eq!(values, ["1", "4", "2", "5", "3", "6"]);
+    let c = load(json!([
+        "Determinant",
+        [
+            "List",
+            ["List", ["Rational", 1, 2], ["Rational", 1, 3]],
+            ["List", ["Rational", 2, 3], ["Rational", 3, 4]]
+        ]
+    ]));
+    assert_eq!(c.snapshot().cells[0].result_text.as_deref(), Some("11/72"));
+}

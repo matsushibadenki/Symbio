@@ -50,6 +50,8 @@ fn reserved(s: &str) -> bool {
         "Abs",
         "Floor",
         "Ceil",
+        "Determinant",
+        "Transpose",
     ]
     .contains(&s)
 }
@@ -216,6 +218,25 @@ pub fn decode(g: &mut Graph, v: &Value) -> Result<Id> {
             }
             return Ok(root);
         }
+        if matches!(f, "Determinant" | "Transpose") {
+            if args.len() != 1 {
+                return Err(unsupported());
+            }
+            let x = go(g, &args[0], depth + 1, budget)?;
+            let root = g.intern(Node::Call(
+                if f == "Determinant" {
+                    "det"
+                } else {
+                    "transpose"
+                }
+                .into(),
+                x,
+            ))?;
+            // This phrasebook requires an explicit compatible matrix, even where
+            // another implementation accepts scalars or arbitrary tensor axes.
+            structured::shape(g, root)?;
+            return Ok(root);
+        }
         let binary = matches!(f, "Subtract" | "Divide" | "Power" | "Equal" | "Rational");
         let unary = matches!(
             f,
@@ -317,6 +338,8 @@ pub fn encode(g: &Graph, root: Id) -> Result<Value> {
                     "abs" => "Abs",
                     "floor" => "Floor",
                     "ceil" => "Ceil",
+                    "det" => "Determinant",
+                    "transpose" => "Transpose",
                     _ => return Err(unsupported()),
                 };
                 json!([f, go(g, *x, depth + 1, budget)?])
@@ -422,6 +445,9 @@ pub fn to_bytes(exchange: &Exchange) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 pub fn import(bytes: &[u8]) -> Result<AppCore> {
+    import_as(bytes, "MathJSON")
+}
+pub(crate) fn import_as(bytes: &[u8], document_name: &str) -> Result<AppCore> {
     if bytes.len() > MAX_BYTES {
         return Err(Error::Limit);
     }
@@ -449,7 +475,7 @@ pub fn import(bytes: &[u8]) -> Result<AppCore> {
     g.rebuild()?;
     structured::shape(&g, root)?;
     let source = latex::source_from_graph(&g, root)?;
-    let mut project = Project::empty("MathJSON")?;
+    let mut project = Project::empty(document_name)?;
     project.current_mut().assumptions = exchange.assumptions;
     let mut core = AppCore::new(project)?;
     core.apply(Request {
@@ -475,14 +501,21 @@ pub fn read(path: impl AsRef<std::path::Path>) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 pub fn write_new(path: impl AsRef<std::path::Path>, exchange: &Exchange) -> Result<()> {
+    write_bytes_new(path, &to_bytes(exchange)?)
+}
+/// Bounded atomic no-clobber persistence shared by exact exchange codecs.
+pub fn write_bytes_new(path: impl AsRef<std::path::Path>, bytes: &[u8]) -> Result<()> {
     use std::io::Write;
+    if bytes.len() > MAX_BYTES {
+        return Err(Error::Limit);
+    }
     let path = path.as_ref();
     let parent = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(std::path::Path::new("."));
     let mut f = tempfile::NamedTempFile::new_in(parent)?;
-    f.write_all(&to_bytes(exchange)?)?;
+    f.write_all(bytes)?;
     f.as_file().sync_all()?;
     f.persist_noclobber(path).map_err(|e| Error::Io(e.error))?;
     Ok(())

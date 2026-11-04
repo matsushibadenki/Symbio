@@ -9,6 +9,7 @@ pub mod graph;
 pub mod latex;
 pub mod mathjson;
 pub mod model;
+pub mod openmath;
 pub mod parser;
 pub mod reproduction;
 mod storage;

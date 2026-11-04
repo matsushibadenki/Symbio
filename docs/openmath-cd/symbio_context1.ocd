@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CD xmlns="http://www.openmath.org/OpenMathCD">
+  <CDName>symbio_context1</CDName>
+  <CDBase>urn:symbio:cd</CDBase>
+  <CDURL>urn:symbio:cd/symbio_context1</CDURL>
+  <CDDate>2026-11-04</CDDate>
+  <CDReviewDate>2027-11-04</CDReviewDate>
+  <CDStatus>experimental</CDStatus>
+  <CDVersion>1</CDVersion>
+  <CDRevision>0</CDRevision>
+  <Description>Symbio's local context dictionary. This is an experimental application extension, not an official OpenMath Society dictionary. See ../openmath.md for the bounded phrasebook and JSON context schema.</Description>
+  <CDDefinition>
+    <Name>context</Name>
+    <Role>semantic-attribution</Role>
+    <Description>The attribute value is an OMSTR containing a JSON object with exactly version, name and assumptions. Version is the integer 1. Name is the Symbio cell label. Assumptions map free symbol names to domain, nonzero and optional MLT dimension fields as defined in Symbio's OpenMath contract. The attributed expression is interpreted under those assumptions. Consumers must preserve and understand this semantic attribute or reject the attributed object; stripping it can change valid simplifications. It does not assert proof or authorize execution. The label itself has no mathematical effect.</Description>
+  </CDDefinition>
+</CD>

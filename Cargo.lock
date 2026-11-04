@@ -3364,6 +3364,7 @@ dependencies = [
  "num-bigint",
  "num-rational",
  "num-traits",
+ "quick-xml",
  "serde",
  "serde_json",
  "sha2",

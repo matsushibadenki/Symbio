@@ -1038,15 +1038,21 @@ pub async fn export_mathjson(
     webview: tauri::Webview,
     generation: u64,
     revision: u64,
+    format: Option<String>,
 ) -> Result<Option<String>, UiError> {
     authorize(&webview)?;
+    let openmath = match format.as_deref() {
+        None | Some("mathjson") => false,
+        Some("openmath") => true,
+        _ => return Err(error("invalid_project")),
+    };
     let app = webview.app_handle().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let operation = app.state::<FileOperation>();
         let _guard = operation.acquire()?;
         prepare(&app)?;
         let _freeze = Freeze::new(&app);
-        let exchange = {
+        let (name, bytes) = {
             let state = app.state::<Shared>();
             let session = state.0.lock().map_err(|_| error("internal_error"))?;
             session.check_generation(generation)?;
@@ -1059,20 +1065,56 @@ pub async fn export_mathjson(
                 .current()
                 .selected
                 .ok_or_else(|| error("invalid_project"))?;
-            symbio_core::mathjson::export(session.core.project(), id)?
+            if openmath {
+                let bytes = symbio_core::openmath::export(session.core.project(), id)?;
+                let name = session
+                    .core
+                    .project()
+                    .current()
+                    .cells
+                    .iter()
+                    .find(|c| c.id == id)
+                    .unwrap()
+                    .name
+                    .clone();
+                (name, bytes)
+            } else {
+                let e = symbio_core::mathjson::export(session.core.project(), id)?;
+                let bytes = symbio_core::mathjson::to_bytes(&e)?;
+                (e.name, bytes)
+            }
         };
         let locale = app.state::<super::workspace::Workspace>().snapshot().locale;
-        let title = match locale.as_str() {
-            "ja" => "数式をMathJSONで書き出す",
-            "zh-CN" => "导出MathJSON表达式",
-            _ => "Export expression as MathJSON",
+        let title = if openmath {
+            match locale.as_str() {
+                "ja" => "数式をOpenMathで書き出す",
+                "zh-CN" => "导出OpenMath表达式",
+                _ => "Export expression as OpenMath",
+            }
+        } else {
+            match locale.as_str() {
+                "ja" => "数式をMathJSONで書き出す",
+                "zh-CN" => "导出MathJSON表达式",
+                _ => "Export expression as MathJSON",
+            }
         };
         let Some(file) = app
             .dialog()
             .file()
             .set_title(title)
-            .add_filter("MathJSON", &["json"])
-            .set_file_name(format!("{}.mathjson.json", exchange.name))
+            .add_filter(
+                if openmath { "OpenMath" } else { "MathJSON" },
+                if openmath { &["xml", "om"] } else { &["json"] },
+            )
+            .set_file_name(format!(
+                "{}.{}",
+                name,
+                if openmath {
+                    "openmath.xml"
+                } else {
+                    "mathjson.json"
+                }
+            ))
             .blocking_save_file()
         else {
             return Ok(None);
@@ -1088,7 +1130,7 @@ pub async fn export_mathjson(
         if path.exists() {
             return Err(error("reproduction_exists"));
         }
-        symbio_core::mathjson::write_new(&path, &exchange)?;
+        symbio_core::mathjson::write_bytes_new(&path, &bytes)?;
         Ok(Some(path.to_string_lossy().into_owned()))
     })
     .await
@@ -1098,8 +1140,14 @@ pub async fn export_mathjson(
 pub async fn import_mathjson(
     webview: tauri::Webview,
     generation: u64,
+    format: Option<String>,
 ) -> Result<Option<DocumentSnapshot>, UiError> {
     authorize(&webview)?;
+    let openmath = match format.as_deref() {
+        None | Some("mathjson") => false,
+        Some("openmath") => true,
+        _ => return Err(error("invalid_project")),
+    };
     let app = webview.app_handle().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let operation = app.state::<FileOperation>();
@@ -1112,23 +1160,37 @@ pub async fn import_mathjson(
             .map_err(|_| error("internal_error"))?
             .check_generation(generation)?;
         let locale = app.state::<super::workspace::Workspace>().snapshot().locale;
-        let title = match locale.as_str() {
-            "ja" => "MathJSONを新しい文書に読み込む",
-            "zh-CN" => "导入MathJSON到新文档",
-            _ => "Import MathJSON into a new document",
+        let title = if openmath {
+            match locale.as_str() {
+                "ja" => "OpenMathを新しい文書に読み込む",
+                "zh-CN" => "导入OpenMath到新文档",
+                _ => "Import OpenMath into a new document",
+            }
+        } else {
+            match locale.as_str() {
+                "ja" => "MathJSONを新しい文書に読み込む",
+                "zh-CN" => "导入MathJSON到新文档",
+                _ => "Import MathJSON into a new document",
+            }
         };
         let Some(file) = app
             .dialog()
             .file()
             .set_title(title)
-            .add_filter("MathJSON", &["json"])
+            .add_filter(
+                if openmath { "OpenMath" } else { "MathJSON" },
+                if openmath { &["xml", "om"] } else { &["json"] },
+            )
             .blocking_pick_file()
         else {
             return Ok(None);
         };
-        let core = symbio_core::mathjson::import(&symbio_core::mathjson::read(
-            file.into_path().map_err(|_| error("io_error"))?,
-        )?)?;
+        let bytes = symbio_core::mathjson::read(file.into_path().map_err(|_| error("io_error"))?)?;
+        let core = if openmath {
+            symbio_core::openmath::import(&bytes)?
+        } else {
+            symbio_core::mathjson::import(&bytes)?
+        };
         let out = {
             let state = app.state::<Shared>();
             let mut session = state.0.lock().map_err(|_| error("internal_error"))?;

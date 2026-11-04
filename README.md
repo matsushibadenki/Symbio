@@ -194,7 +194,7 @@ cargo run --locked -p symbio-cli -- export-mathjson study.symbio expression.math
 cargo run --locked -p symbio-cli -- import-mathjson expression.mathjson.json new-study.symbio
 ```
 
-Existing files are never overwritten. See the [supported subset and context envelope](docs/mathjson.md), [model example](examples/mathjson-model.json) and [matrix example](examples/mathjson-matrix.json). OpenMath and full MathJSON compatibility are not implemented.
+Existing files are never overwritten. See the [supported subset and context envelope](docs/mathjson.md), [model example](examples/mathjson-model.json) and [matrix example](examples/mathjson-matrix.json). Full MathJSON compatibility remains unfinished; the bounded OpenMath XML subset is described below.
 
 ## Compare 3D surfaces
 
@@ -223,3 +223,11 @@ Run `symbio-cli mcp` for stateless Rust calculations and LaTeX previews over MCP
 ### Higher-degree polynomial equations
 
 With local SymPy configured, the equation action `x = ? · CAS` finds exact real roots when every rational factor has degree one or two (total degree ≤32). Rust checks the factor-product identity and solves every factor. Higher-degree residual factors reject the complete operation, so partial roots are never presented as all solutions. The original `x = ?` remains an offline quadratic solver. See [scope and evidence](docs/cas.md) and [an importable equation](examples/cas-polynomial.mathjson.json).
+
+### OpenMath XML exchange
+
+**Structure & history → OpenMath** imports or exports an exact XML subset: rational numbers, scalar arithmetic/functions, equations, matrix constructors, determinants and transposes. Authored definitions retain explicit assumptions in a documented Symbio semantic context attribute. Plain objects import without inferred assumptions. CLI commands are `export-openmath PROJECT XML` and `import-openmath XML NEW_PROJECT`; existing files are never overwritten. See [supported meanings and limits](docs/openmath.md).
+
+OpenMath exchange also supports explicitly bound derivatives, indefinite/definite integrals and finite sums/products, preserving the authored operation and its scope. See the [calculus XML example](examples/calculus.openmath.xml). Function application is limited to the same named variable for derivatives and primitives; general function evaluation remains unsupported.
+
+Matrix exchange preserves authored `Determinant` and `Transpose` operations in MathJSON and their `linalg1` counterparts in OpenMath. Rectangular transposes and exact rational determinants run in Rust. See the [transpose XML example](examples/transpose.openmath.xml). Other OpenMath matrix arithmetic remains unsupported.
