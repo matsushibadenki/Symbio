@@ -49,3 +49,15 @@ Verification captures the same fields locally and returns `recorded_environment`
 Existing v1 packages without the optional field retain their checksum serialization and remain readable; the status is `unrecorded`, never an assumed match. Unsupported manifest versions, unknown fields, malformed digests and excessive metadata are rejected before replay. There is no automatic installation, environment restoration, external runtime probing, path selection or execution based on a manifest. Hostnames, usernames, environment variables and interpreter paths are not collected. SymPy versions used for results remain in per-result engine evidence; the exporter manifest does not assert which interpreter or library produced an older cached result.
 
 Complete event replay and original-per-calculation environment capture remain planned. This manifest does not change the document format or engine identifier.
+
+### Compiler identity
+
+New environment manifests include an optional `compiler` field captured with `RUSTC --version` at build time. No local executable is probed when opening or verifying a package. Older manifests deserialize with this field absent; missing versus recorded compiler identity is reported as an environment difference, independently of mathematical replay success. This field does not fingerprint the compiled binary or recover its historical dependencies.
+
+### Core source identity
+
+New manifests include optional `core_source_sha256`. The build hashes a versioned, length-framed stream of sorted relative names and raw file bytes: the core Cargo.toml, build.rs and every .rs file under src. Absolute paths, Git metadata, tests, UI, external adapters and binary contents are excluded. Source symlinks fail the build rather than silently escaping this scope. Cargo tracks source-directory changes so added/deleted files trigger rebuilding. This identifies a bounded source set, not the whole application or historical execution environment. Missing legacy fingerprints compare as differences without preventing mathematical replay.
+
+### Selected build configuration
+
+The optional `build` object records the core's target triple, Cargo optimization level, effective debug-assertion mode and target CPU feature list. Target, optimization and feature values are captured by the build script; assertion mode is compiled into the core. Missing legacy data and any changed setting are reported as a `build` environment difference without changing mathematical replay status. Inputs are bounded and validated. Raw RUSTFLAGS, compiler paths, environment variables, credentials and hostnames are not included. This is a selected configuration record: linker options, LTO, dependency-specific profiles, native libraries and the final binary are not fully identified.

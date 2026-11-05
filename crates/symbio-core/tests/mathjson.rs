@@ -462,3 +462,34 @@ fn matrix_exchange_results_have_independently_checked_entries_and_rationals() {
     ]));
     assert_eq!(c.snapshot().cells[0].result_text.as_deref(), Some("11/72"));
 }
+
+#[test]
+fn explicit_matrix_product_keeps_order_shape_and_authored_operation() {
+    let a = json!(["List", ["List", 1, 2], ["List", 3, 4]]);
+    let b = json!(["List", ["List", 5, 6], ["List", 7, 8]]);
+    let c = load(json!(["MatrixMultiply", a, b]));
+    assert_eq!(
+        c.snapshot().cells[0].result_text.as_deref(),
+        Some("matrix(2x2; 19, 22, 43, 50)")
+    );
+    let e = export(c.project(), 1).unwrap();
+    assert_eq!(e.expression[0], "MatrixMultiply");
+    let copy = import(&to_bytes(&e).unwrap()).unwrap();
+    assert_eq!(
+        c.snapshot().cells[0].result_text,
+        copy.snapshot().cells[0].result_text
+    );
+    assert_ne!(
+        c.snapshot().cells[0].result_text,
+        load(json!(["MatrixMultiply", b, a])).snapshot().cells[0].result_text
+    );
+    for v in [
+        json!(["MatrixMultiply", 2, a]),
+        json!(["MatrixMultiply", a]),
+        json!(["MatrixMultiply", a, b, a]),
+        json!(["MatrixMultiply", a, ["List", ["List", 1, 2, 3]]]),
+        json!(["HadamardProduct", a, b]),
+    ] {
+        assert!(import(&serde_json::to_vec(&v).unwrap()).is_err());
+    }
+}

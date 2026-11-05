@@ -231,3 +231,11 @@ With local SymPy configured, the equation action `x = ? · CAS` finds exact real
 OpenMath exchange also supports explicitly bound derivatives, indefinite/definite integrals and finite sums/products, preserving the authored operation and its scope. See the [calculus XML example](examples/calculus.openmath.xml). Function application is limited to the same named variable for derivatives and primitives; general function evaluation remains unsupported.
 
 Matrix exchange preserves authored `Determinant` and `Transpose` operations in MathJSON and their `linalg1` counterparts in OpenMath. Rectangular transposes and exact rational determinants run in Rust. See the [transpose XML example](examples/transpose.openmath.xml). Other OpenMath matrix arithmetic remains unsupported.
+
+Reproduction environment reports also compare the build-time Rust compiler version. Older packages remain readable, with missing compiler metadata shown separately from mathematical replay success.
+
+Reproduction packages also compare a build-time SHA-256 fingerprint of the Rust core source set. This detects source changes under the same package version; it does not identify the complete application binary.
+
+Reproduction reports include selected core build settings: target, optimization level, debug assertions and CPU features. These are compared independently from mathematical replay; missing legacy data is reported as an environment difference.
+
+MathJSON matrix-by-matrix products now export with explicit `MatrixMultiply(A, B)`, preserving operand order and validating dimensions. Existing `Multiply` matrix inputs remain supported; Hadamard products and vector products are outside this subset.

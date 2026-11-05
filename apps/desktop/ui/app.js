@@ -222,8 +222,8 @@ function dependencyWindow(){
 
 function environmentReport(r){
  const table=el('table',{class:'environment-table'},el('thead',{},el('tr',{},...['environment_field','environment_recorded','environment_current'].map(k=>el('th',{text:t(k)})))));
- const body=el('tbody');for(const key of ['os','arch','pointer_width','endian','core_version','numeric_model','cargo_lock_sha256']){
-  const recorded=r.recorded_environment?.[key];body.append(el('tr',{class:r.environment_differences?.includes(key)?'environment-difference':''},el('th',{scope:'row',text:t('environment_'+key)}),el('td',{text:recorded==null?'—':String(recorded)}),el('td',{text:String(r.current_environment?.[key]??'—')})));
+ const body=el('tbody');for(const key of ['os','arch','pointer_width','endian','core_version','numeric_model','cargo_lock_sha256','compiler','core_source_sha256','build']){
+  const recorded=r.recorded_environment?.[key];body.append(el('tr',{class:r.environment_differences?.includes(key)?'environment-difference':''},el('th',{scope:'row',text:t('environment_'+key)}),el('td',{text:recorded==null?'—':typeof recorded==='object'?JSON.stringify(recorded):String(recorded)}),el('td',{text:typeof r.current_environment?.[key]==='object'?JSON.stringify(r.current_environment[key]):String(r.current_environment?.[key]??'—')})));
  }table.append(body);
  const details=disclosure('reproduction-environment',el('span',{text:t('environment')+' · '+t('environment_'+(r.environment_status||'unrecorded'))}),el('div',{class:'reproduction-tools'},button('environment_help','info',()=>{})),table);details.classList.add('environment-report');return details;
 }

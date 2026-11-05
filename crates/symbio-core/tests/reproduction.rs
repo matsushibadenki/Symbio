@@ -441,3 +441,99 @@ fn invalid_and_tampered_environment_metadata_is_rejected() {
     v["payload"]["environment"]["executable"] = "python3".into();
     assert!(from_bytes(&serde_json::to_vec(&v).unwrap()).is_err());
 }
+
+#[test]
+fn compiler_metadata_is_optional_but_never_silently_matches_missing_fields() {
+    let mut c = core();
+    define(&mut c, None, "f", "x^2");
+    let mut p = capture(c.project()).unwrap();
+    assert!(
+        p.payload
+            .environment
+            .as_ref()
+            .unwrap()
+            .compiler
+            .as_ref()
+            .unwrap()
+            .starts_with("rustc ")
+    );
+    let mut value = serde_json::to_value(Environment::current()).unwrap();
+    value.as_object_mut().unwrap().remove("compiler");
+    p.payload.environment = Some(serde_json::from_value(value).unwrap());
+    seal(&mut p);
+    let r = verify(&from_bytes(&to_bytes(&p).unwrap()).unwrap()).unwrap();
+    assert!(r.reproduced);
+    assert_eq!(r.environment_differences, vec!["compiler"]);
+    p.payload.environment.as_mut().unwrap().compiler = Some("bad\nvalue".into());
+    seal(&mut p);
+    assert!(from_bytes(&to_bytes(&p).unwrap()).is_err());
+}
+
+#[test]
+fn source_identity_differences_do_not_change_mathematical_replay() {
+    let mut c = core();
+    define(&mut c, None, "f", "x^2");
+    let mut p = capture(c.project()).unwrap();
+    assert_eq!(
+        p.payload
+            .environment
+            .as_ref()
+            .unwrap()
+            .core_source_sha256
+            .as_ref()
+            .unwrap()
+            .len(),
+        64
+    );
+    for fingerprint in [None, Some("0".repeat(64))] {
+        p.payload.environment.as_mut().unwrap().core_source_sha256 = fingerprint;
+        seal(&mut p);
+        let r = verify(&from_bytes(&to_bytes(&p).unwrap()).unwrap()).unwrap();
+        assert!(r.reproduced);
+        assert_eq!(r.environment_differences, vec!["core_source_sha256"]);
+    }
+    p.payload.environment.as_mut().unwrap().core_source_sha256 = Some("not-a-digest".into());
+    seal(&mut p);
+    assert!(from_bytes(&to_bytes(&p).unwrap()).is_err());
+}
+
+#[test]
+fn build_configuration_is_backward_compatible_and_separate_from_replay() {
+    let mut c = core();
+    define(&mut c, None, "f", "x^2");
+    let mut p = capture(c.project()).unwrap();
+    let current = p
+        .payload
+        .environment
+        .as_ref()
+        .unwrap()
+        .build
+        .clone()
+        .unwrap();
+    assert!(!current.target.is_empty());
+    let mut changed = current.clone();
+    changed.debug_assertions = !changed.debug_assertions;
+    for build in [None, Some(changed)] {
+        p.payload.environment.as_mut().unwrap().build = build;
+        seal(&mut p);
+        let r = verify(&from_bytes(&to_bytes(&p).unwrap()).unwrap()).unwrap();
+        assert!(r.reproduced);
+        assert_eq!(r.environment_differences, vec!["build"]);
+    }
+    let mut value = serde_json::to_value(Environment::current()).unwrap();
+    value.as_object_mut().unwrap().remove("build");
+    let legacy: Environment = serde_json::from_value(value).unwrap();
+    assert!(legacy.build.is_none());
+    for (field, invalid) in [
+        ("target", "../local"),
+        ("optimization", "fast"),
+        ("target_features", "local\npath"),
+    ] {
+        let mut value = serde_json::to_value(&current).unwrap();
+        value[field] = invalid.into();
+        p.payload.environment.as_mut().unwrap().build =
+            Some(serde_json::from_value(value).unwrap());
+        seal(&mut p);
+        assert!(from_bytes(&to_bytes(&p).unwrap()).is_err());
+    }
+}

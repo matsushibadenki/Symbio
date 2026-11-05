@@ -218,6 +218,21 @@ pub fn decode(g: &mut Graph, v: &Value) -> Result<Id> {
             }
             return Ok(root);
         }
+        if f == "MatrixMultiply" {
+            if args.len() != 2 {
+                return Err(unsupported());
+            }
+            let x = go(g, &args[0], depth + 1, budget)?;
+            let y = go(g, &args[1], depth + 1, budget)?;
+            if !matches!(structured::shape(g, x)?, structured::Shape::Matrix(..))
+                || !matches!(structured::shape(g, y)?, structured::Shape::Matrix(..))
+            {
+                return Err(unsupported());
+            }
+            let root = g.intern(Node::Mul(x, y))?;
+            structured::shape(g, root)?;
+            return Ok(root);
+        }
         if matches!(f, "Determinant" | "Transpose") {
             if args.len() != 1 {
                 return Err(unsupported());
@@ -317,6 +332,15 @@ pub fn encode(g: &Graph, root: Id) -> Result<Value> {
                 let f = match &g.nodes[id] {
                     Node::Add(..) => "Add",
                     Node::Sub(..) => "Subtract",
+                    Node::Mul(x, y)
+                        if matches!(structured::shape(g, *x)?, structured::Shape::Matrix(..))
+                            && matches!(
+                                structured::shape(g, *y)?,
+                                structured::Shape::Matrix(..)
+                            ) =>
+                    {
+                        "MatrixMultiply"
+                    }
                     Node::Mul(..) => "Multiply",
                     Node::Div(..) => "Divide",
                     Node::Pow(..) => "Power",

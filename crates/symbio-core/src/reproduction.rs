@@ -30,6 +30,15 @@ pub struct Payload {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment: Option<Environment>,
 }
+/// Selected core compilation settings, excluding flags that may contain local paths.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BuildConfiguration {
+    pub target: String,
+    pub optimization: String,
+    pub debug_assertions: bool,
+    pub target_features: String,
+}
 /// Non-identifying kernel environment. No paths, hostnames or runtime probing.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -42,10 +51,24 @@ pub struct Environment {
     pub core_version: String,
     pub numeric_model: String,
     pub cargo_lock_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compiler: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build: Option<BuildConfiguration>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub core_source_sha256: Option<String>,
 }
 impl Environment {
     pub fn current() -> Self {
         Self {
+            core_source_sha256: Some(env!("SYMBIO_CORE_SOURCE_SHA256").into()),
+            build: Some(BuildConfiguration {
+                target: env!("SYMBIO_BUILD_TARGET").into(),
+                optimization: env!("SYMBIO_BUILD_OPT").into(),
+                debug_assertions: cfg!(debug_assertions),
+                target_features: env!("SYMBIO_TARGET_FEATURES").into(),
+            }),
+            compiler: Some(env!("SYMBIO_RUSTC_VERSION").into()),
             version: 1,
             os: std::env::consts::OS.into(),
             arch: std::env::consts::ARCH.into(),
@@ -65,7 +88,26 @@ impl Environment {
         if self.version != 1 {
             return Err(Error::Version);
         }
-        if ![16, 32, 64, 128].contains(&self.pointer_width)
+        if self.build.as_ref().is_some_and(|b| {
+            b.target.is_empty()
+                || b.target.len() > 128
+                || !b
+                    .target
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_' | b'.'))
+                || !["0", "1", "2", "3", "s", "z"].contains(&b.optimization.as_str())
+                || b.target_features.len() > 2048
+                || !b.target_features.bytes().all(|c| {
+                    c.is_ascii_alphanumeric() || matches!(c, b',' | b'-' | b'_' | b'.' | b'+')
+                })
+        }) || self.core_source_sha256.as_ref().is_some_and(|s| {
+            s.len() != 64
+                || !s
+                    .bytes()
+                    .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+        }) || self.compiler.as_ref().is_some_and(|s| {
+            s.is_empty() || s.len() > 128 || !s.bytes().all(|c| c.is_ascii_graphic() || c == b' ')
+        }) || ![16, 32, 64, 128].contains(&self.pointer_width)
             || !["little", "big"].contains(&self.endian.as_str())
             || [
                 &self.os,
@@ -95,7 +137,10 @@ impl Environment {
             endian,
             core_version,
             numeric_model,
-            cargo_lock_sha256
+            cargo_lock_sha256,
+            compiler,
+            core_source_sha256,
+            build
         );
         differences
     }
