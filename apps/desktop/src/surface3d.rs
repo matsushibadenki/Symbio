@@ -271,7 +271,17 @@ struct Mesh {
 }
 fn sample(
     graph: &Graph,
+    root: Id,
+    assumptions: &BTreeMap<String, Assumption>,
+    x_range: [f64; 2],
+    y_range: [f64; 2],
+) -> Result<Mesh, &'static str> {
+    sample_resolution(graph, root, STEPS, assumptions, x_range, y_range)
+}
+fn sample_resolution(
+    graph: &Graph,
     mut root: Id,
+    steps: usize,
     assumptions: &BTreeMap<String, Assumption>,
     x_range: [f64; 2],
     y_range: [f64; 2],
@@ -286,15 +296,15 @@ fn sample(
     if graph.symbols(root).iter().any(|s| s != "x" && s != "y") {
         return Err("surface_variable");
     }
-    let n = STEPS + 1;
+    let n = steps + 1;
     let mut values = vec![None; n * n];
     let mut min = f64::INFINITY;
     let mut max = f64::NEG_INFINITY;
     let mut count = 0;
     for i in 0..n {
         for j in 0..n {
-            let x = x_range[0] + (x_range[1] - x_range[0]) * j as f64 / STEPS as f64;
-            let y = y_range[0] + (y_range[1] - y_range[0]) * i as f64 / STEPS as f64;
+            let x = x_range[0] + (x_range[1] - x_range[0]) * j as f64 / steps as f64;
+            let y = y_range[0] + (y_range[1] - y_range[0]) * i as f64 / steps as f64;
             if !accepts(assumptions.get("x"), x) || !accepts(assumptions.get("y"), y) {
                 continue;
             }
@@ -313,15 +323,59 @@ fn sample(
         return Err("domain_error");
     }
     let span = max - min;
+    // Global curvature heuristic: bound refinement to one extra level. Missing
+    // samples do not imply smoothness, and this is not a numerical certificate.
+    if steps == STEPS && count == n * n && span > 0. {
+        let curved = (1..steps).any(|i| (1..steps).any(|j| {
+            let second = |a: Option<f64>, b: Option<f64>, c: Option<f64>| {
+                matches!((a,b,c), (Some(a),Some(b),Some(c)) if ((a-b)/span + (c-b)/span).abs() > 0.02)
+            };
+            second(values[i*n+j-1], values[i*n+j], values[i*n+j+1])
+                || second(values[(i-1)*n+j], values[i*n+j], values[(i+1)*n+j])
+        }));
+        if curved {
+            return sample_resolution(graph, root, steps * 2, assumptions, x_range, y_range);
+        }
+    }
+    // Probe cell centers as well: a coarse lattice can alias a curved surface
+    // into a plane. At most 4096 additional evaluations, with one refinement.
+    if steps == STEPS && count == n * n {
+        let mismatch = (0..steps).any(|i| {
+            (0..steps).any(|j| {
+                let x = x_range[0] + (x_range[1] - x_range[0]) * (j as f64 + 0.5) / steps as f64;
+                let y = y_range[0] + (y_range[1] - y_range[0]) * (i as f64 + 0.5) / steps as f64;
+                let expected = [
+                    values[i * n + j],
+                    values[i * n + j + 1],
+                    values[(i + 1) * n + j],
+                    values[(i + 1) * n + j + 1],
+                ]
+                .into_iter()
+                .map(|v| v.unwrap() * 0.25)
+                .sum::<f64>();
+                match graph.numeric(root, &BTreeMap::from([("x".into(), x), ("y".into(), y)])) {
+                    Ok(z) if z.is_finite() && z.abs() <= 1e12 => {
+                        let error = (z - expected).abs();
+                        let rounding = 128. * f64::EPSILON * z.abs().max(expected.abs()).max(span);
+                        error > rounding && error > 0.02 * span
+                    }
+                    _ => true,
+                }
+            })
+        });
+        if mismatch {
+            return sample_resolution(graph, root, steps * 2, assumptions, x_range, y_range);
+        }
+    }
     let flat = span == 0.;
     let vertex = |i: usize, j: usize| {
         values[i * n + j].map(|z| {
             let t = if flat { 0.5 } else { ((z - min) / span) as f32 };
             Vertex {
                 position: [
-                    -2. + 4. * j as f32 / STEPS as f32,
+                    -2. + 4. * j as f32 / steps as f32,
                     if flat { 0. } else { (t - 0.5) * 2.5 },
-                    -2. + 4. * i as f32 / STEPS as f32,
+                    -2. + 4. * i as f32 / steps as f32,
                 ],
                 color: [
                     0.10 + 0.55 * t,
@@ -333,8 +387,18 @@ fn sample(
     };
     let mut triangles = vec![];
     let mut lines = vec![];
-    for i in 0..STEPS {
-        for j in 0..STEPS {
+    for i in 0..steps {
+        for j in 0..steps {
+            // A valid corner lattice does not establish an interior domain.
+            // Keep detected holes open even at the final refinement level.
+            let x = x_range[0] + (x_range[1] - x_range[0]) * (j as f64 + 0.5) / steps as f64;
+            let y = y_range[0] + (y_range[1] - y_range[0]) * (i as f64 + 0.5) / steps as f64;
+            if !accepts(assumptions.get("x"), x)
+                || !accepts(assumptions.get("y"), y)
+                || !matches!(graph.numeric(root, &BTreeMap::from([("x".into(), x), ("y".into(), y)])), Ok(z) if z.is_finite() && z.abs() <= 1e12)
+            {
+                continue;
+            }
             let points = [
                 vertex(i, j),
                 vertex(i, j + 1),
@@ -1038,5 +1102,73 @@ mod comparison_tests {
         let text = String::from_utf8(bytes).unwrap();
         assert!(!text.contains("triangles"));
         assert!(!text.contains("vertices"));
+    }
+}
+
+#[cfg(test)]
+mod adaptive_sampling_tests {
+    use super::*;
+    #[test]
+    fn curved_surfaces_refine_once_while_planes_keep_the_base_grid() {
+        let mut g = Graph::default();
+        let plane = symbio_core::parser::parse(&mut g, "x+y").unwrap();
+        let wave = symbio_core::parser::parse(&mut g, "sin(40*x)*cos(30*y)").unwrap();
+        let a = BTreeMap::new();
+        assert_eq!(
+            sample(&g, plane, &a, [-2., 2.], [-2., 2.]).unwrap().samples,
+            65 * 65
+        );
+        let m = sample(&g, wave, &a, [-2., 2.], [-2., 2.]).unwrap();
+        assert_eq!(m.samples, 129 * 129);
+        assert_eq!(m.omitted, 0);
+        assert!(
+            m.triangles
+                .iter()
+                .all(|v| v.position.iter().all(|x| x.is_finite()))
+        );
+    }
+}
+
+#[cfg(test)]
+mod midpoint_sampling_tests {
+    use super::*;
+    #[test]
+    fn lattice_aligned_oscillations_are_not_treated_as_flat() {
+        let mut g = Graph::default();
+        let root = symbio_core::parser::parse(&mut g, "cos(201.06192982974676*x)+y").unwrap();
+        let m = sample(&g, root, &BTreeMap::new(), [0., 2.], [0., 2.]).unwrap();
+        assert_eq!(m.samples, 129 * 129);
+        assert!(m.heights[0] < -0.99 && m.heights[1] > 0.99);
+        let flat = symbio_core::parser::parse(&mut g, "3").unwrap();
+        assert_eq!(
+            sample(&g, flat, &BTreeMap::new(), [0., 2.], [0., 2.])
+                .unwrap()
+                .samples,
+            65 * 65
+        );
+    }
+}
+
+#[cfg(test)]
+mod interior_domain_tests {
+    use super::*;
+    #[test]
+    fn valid_corners_do_not_bridge_an_undefined_cell_center() {
+        let mut g = Graph::default();
+        let root = symbio_core::parser::parse(&mut g, "sqrt((x-0.00390625)^2-0.000001)").unwrap();
+        let m = sample_resolution(&g, root, 128, &BTreeMap::new(), [0., 1.], [0., 1.]).unwrap();
+        assert_eq!(m.omitted, 0); // All grid points are valid, unlike the interior.
+        let hole = -2. + 4. * 0.00390625;
+        for triangle in m.triangles.as_chunks::<3>().0 {
+            let min = triangle
+                .iter()
+                .map(|v| v.position[0])
+                .fold(f32::INFINITY, f32::min);
+            let max = triangle
+                .iter()
+                .map(|v| v.position[0])
+                .fold(f32::NEG_INFINITY, f32::max);
+            assert!(!(min < hole && max > hole));
+        }
     }
 }

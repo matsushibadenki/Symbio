@@ -420,7 +420,6 @@ fn determinant_and_transpose_preserve_authored_matrix_operations() {
         json!(["Transpose", m, 1, 2]),
         json!(["Determinant", m, 0]),
         json!(["ConjugateTranspose", m]),
-        json!(["Inverse", m]),
     ] {
         assert!(import(&serde_json::to_vec(&v).unwrap()).is_err(), "{v}");
     }
@@ -489,6 +488,44 @@ fn explicit_matrix_product_keeps_order_shape_and_authored_operation() {
         json!(["MatrixMultiply", a, b, a]),
         json!(["MatrixMultiply", a, ["List", ["List", 1, 2, 3]]]),
         json!(["HadamardProduct", a, b]),
+    ] {
+        assert!(import(&serde_json::to_vec(&v).unwrap()).is_err());
+    }
+}
+
+#[test]
+fn inverse_matrix_exchange_keeps_exact_values_and_domain_failures() {
+    let m = json!(["List", ["List", 1, 2], ["List", 3, 4]]);
+    let c = load(json!(["Inverse", m]));
+    assert_eq!(
+        c.snapshot().cells[0].result_text.as_deref(),
+        Some("matrix(2x2; -2, 1, 3/2, -1/2)")
+    );
+    let e = export(c.project(), 1).unwrap();
+    let copy = import(&to_bytes(&e).unwrap()).unwrap();
+    assert_eq!(
+        copy.snapshot().cells[0].result_text,
+        c.snapshot().cells[0].result_text
+    );
+    let singular = load(json!(["Inverse", ["List", ["List", 1, 2], ["List", 2, 4]]]));
+    assert_eq!(
+        singular.snapshot().cells[0]
+            .cell
+            .calculation_error
+            .as_deref(),
+        Some("domain_error")
+    );
+    let e = export(singular.project(), 1).unwrap();
+    let copy = import(&to_bytes(&e).unwrap()).unwrap();
+    assert_eq!(
+        copy.snapshot().cells[0].cell.calculation_error.as_deref(),
+        Some("domain_error")
+    );
+    for v in [
+        json!(["Inverse", 2]),
+        json!(["Inverse", "x"]),
+        json!(["Inverse", ["List", ["List", 1, 2]]]),
+        json!(["Inverse", m, 2]),
     ] {
         assert!(import(&serde_json::to_vec(&v).unwrap()).is_err());
     }

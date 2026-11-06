@@ -20,7 +20,11 @@ fn main() {
             assert!(!ty.is_symlink(), "source symlinks are not fingerprinted");
             if ty.is_dir() {
                 collect(&entry.path(), files);
-            } else if entry.path().extension().is_some_and(|s| s == "rs") {
+            } else if entry
+                .path()
+                .extension()
+                .is_some_and(|s| s == "rs" || s == "py")
+            {
                 files.push(entry.path());
             }
         }
@@ -29,7 +33,7 @@ fn main() {
     files.sort();
     println!("cargo:rerun-if-changed=src");
     let mut hash = Sha256::new();
-    hash.update(b"symbio-core-source-v1\0");
+    hash.update(b"symbio-core-source-v2\0");
     for file in files {
         println!("cargo:rerun-if-changed={}", file.display());
         let name = file.to_str().expect("source name").replace('\\', "/");

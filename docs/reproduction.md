@@ -56,7 +56,7 @@ New environment manifests include an optional `compiler` field captured with `RU
 
 ### Core source identity
 
-New manifests include optional `core_source_sha256`. The build hashes a versioned, length-framed stream of sorted relative names and raw file bytes: the core Cargo.toml, build.rs and every .rs file under src. Absolute paths, Git metadata, tests, UI, external adapters and binary contents are excluded. Source symlinks fail the build rather than silently escaping this scope. Cargo tracks source-directory changes so added/deleted files trigger rebuilding. This identifies a bounded source set, not the whole application or historical execution environment. Missing legacy fingerprints compare as differences without preventing mathematical replay.
+New manifests include optional `core_source_sha256`. The build hashes a versioned, length-framed stream of sorted relative names and raw file bytes: the core Cargo.toml, build.rs and every .rs and .py file under src (including the embedded CAS worker). Absolute paths, Git metadata, tests, UI, external interpreter/library contents and binary contents are excluded. The stream prefix is now `symbio-core-source-v2`, so older v1 digests intentionally compare as different. The embedded Python worker is part of this source set; the installed SymPy package remains separate per-result evidence. Source symlinks fail the build rather than silently escaping this scope. Cargo tracks source-directory changes so added/deleted files trigger rebuilding. This identifies a bounded source set, not the whole application or historical execution environment. Missing legacy fingerprints compare as differences without preventing mathematical replay.
 
 ### Selected build configuration
 

@@ -52,6 +52,7 @@ fn reserved(s: &str) -> bool {
         "Ceil",
         "Determinant",
         "Transpose",
+        "Inverse",
     ]
     .contains(&s)
 }
@@ -233,7 +234,7 @@ pub fn decode(g: &mut Graph, v: &Value) -> Result<Id> {
             structured::shape(g, root)?;
             return Ok(root);
         }
-        if matches!(f, "Determinant" | "Transpose") {
+        if matches!(f, "Determinant" | "Transpose" | "Inverse") {
             if args.len() != 1 {
                 return Err(unsupported());
             }
@@ -241,8 +242,10 @@ pub fn decode(g: &mut Graph, v: &Value) -> Result<Id> {
             let root = g.intern(Node::Call(
                 if f == "Determinant" {
                     "det"
-                } else {
+                } else if f == "Transpose" {
                     "transpose"
+                } else {
+                    "inverse"
                 }
                 .into(),
                 x,
@@ -364,6 +367,7 @@ pub fn encode(g: &Graph, root: Id) -> Result<Value> {
                     "ceil" => "Ceil",
                     "det" => "Determinant",
                     "transpose" => "Transpose",
+                    "inverse" => "Inverse",
                     _ => return Err(unsupported()),
                 };
                 json!([f, go(g, *x, depth + 1, budget)?])

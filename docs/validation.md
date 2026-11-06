@@ -345,3 +345,31 @@ Reproduction tests: **19 passed**. New coverage verifies optional legacy configu
 ## 2026-11-04 · Explicit MathJSON matrix products
 
 MathJSON/OpenMath integration tests: **29 passed** (17 MathJSON, 12 OpenMath). The new matrix-product test checks exact entries 19,22,43,50, noncommutative operand order, authored operator roundtrip and rejection of wrong shapes, scalar operands, extra arguments and Hadamard products. Core all-target Clippy with warnings denied passed. A real CLI import/export independently confirmed the exact result and exported MatrixMultiply head. No native app restart or document edit was performed. Existing Multiply matrix inputs retain their meaning; binary MatrixMultiply is the explicit export for two matrix operands. OpenMath matrix products, vectors and element-wise products remain unsupported.
+
+## 2026-11-06 · MathJSON inverse matrices
+
+MathJSON/OpenMath integration tests: **30 passed** (18 MathJSON, 12 OpenMath). New coverage verifies exact inverse entries −2,1,3/2,−1/2, mathematical roundtrip, preserved singular-matrix domain errors and rejected scalar/nonsquare/extra-argument inputs. Core all-target Clippy with warnings denied, JavaScript syntax and whitespace checks passed. Real CLI import/export/reimport retained the exact inverse result. Existing Rust matrix algorithms are reused; generated LaTeX can normalize Inverse to a matrix power of −1. Native UI was not restarted or edited, and no new rendered-flow verification is claimed. OpenMath inverse exchange remains unsupported.
+
+## 2026-11-06 · Bounded curvature-based surface refinement
+
+Desktop tests: **57 passed**. The new test checks that a plane retains 4225 samples while sin(40x)cos(30y) refines to 16641 samples with finite mesh coordinates. Existing domain masks, assumptions, independent ranges, shared-height comparison and small-height regression tests passed. Refinement is limited to one global level and only fully valid initial grids; it is a display heuristic without certified error or feature-detection guarantees. Native GPU appearance/performance on real research models remains unverified in this pass; no running document or app was modified.
+
+## 2026-11-06 · Surface midpoint probes
+
+Desktop tests: **58 passed**. A lattice-aligned cosine plus a linear slope refines from 65×65 to 129×129 and recovers the negative trough; a constant remains at base resolution. Existing range, domain-mask and comparison regressions pass. Cell-center interpolation discrepancies and invalid center values trigger at most one global refinement; up to 4096 extra evaluations remain entirely in Rust. Native GPU rendering/performance remains unverified. This does not guarantee narrow-feature or singularity detection; the existing steep-triangle rejection still applies after refinement. No running document was edited or restarted.
+
+## 2026-11-06 · Interior surface-domain masking
+
+Desktop tests: **59 passed**. A new regression constructs a square-root surface with all 129×129 lattice points valid but undefined centers in the first cell column; emitted triangles must not bridge that interior hole. Existing masking, adaptive sampling, ranges and comparisons passed. Final mesh generation skips both triangles and wire lines for detected invalid centers, including at the final refinement level. Core samples/omissions still count lattice points only. Desktop all-target Clippy with warnings denied passed after adopting array-chunk iteration in the test. Native GPU rendering and performance remain unverified; the new checks add at most 16384 numeric evaluations per final surface. Probe-based masking is not an exhaustive domain or singularity analysis. No running document was changed or restarted.
+
+## 2026-11-06 · Embedded CAS worker provenance
+
+Full Rust regression suite: **178 passed** across core, CLI and desktop. `scripts/smoke-source-fingerprint.py` runs the actual compiled build script against an isolated temporary source tree: repeated inputs produce the same digest, worker-only Python edits change it, and worker deletion changes it again. Core source manifest v2 now includes .rs and .py files under src, retaining sorted relative names and length framing. Previous v1 digests intentionally differ without invalidating mathematical replay. This does not fingerprint installed Python/SymPy or the final binary. No running application or research document was modified; the GUI provenance table remains unverified.
+
+## 2026-11-06 · Rational-affine elementary integration
+
+Core regression suite: **117 passed**; core all-target Clippy with warnings denied and whitespace checks passed. New tests differentiate the computed primitives of sin(2x+1), cos(−3x+2), exp(x/3−1/2) and sin(x), comparing their values with the original integrands at four real points to tolerance 1e−12. Nonlinear and unknown-symbol slopes are rejected. Existing structured, MathJSON/OpenMath, domain and replay regressions passed. Real CLI import of an explicit integral of exp(2x) returned exp(2x)/2 with exact precision and the arbitrary-constant condition. Numeric spot checks are regression evidence, not a formal proof. Native UI was not restarted or modified; general integration, branch-sensitive logarithmic primitives and symbolic slopes remain unfinished.
+
+## 2026-11-06 · Rational scaling of elementary integrals
+
+Core suite: **117 passed**; core all-target Clippy with warnings denied passed. Primitive differentiation tests now include 3 sin(2x+1), cos(3x)/5 and −2 exp(2x)/3, with rational coefficients normalized through the normal simplification path before integration. Rejection tests include x sin(x), sin(x)/x and division by zero. Real CLI import of an explicit integral of 3 exp(2x) returned an exact symbolic primitive. These regression checks do not constitute formal proof. No native app or document was modified. Symbolic constant factors, integration by parts and general variable-dependent denominators remain outside this extension.

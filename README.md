@@ -239,3 +239,17 @@ Reproduction packages also compare a build-time SHA-256 fingerprint of the Rust 
 Reproduction reports include selected core build settings: target, optimization level, debug assertions and CPU features. These are compared independently from mathematical replay; missing legacy data is reported as an environment difference.
 
 MathJSON matrix-by-matrix products now export with explicit `MatrixMultiply(A, B)`, preserving operand order and validating dimensions. Existing `Multiply` matrix inputs remain supported; Hadamard products and vector products are outside this subset.
+
+MathJSON `Inverse(matrix)` now connects to the exact Rust matrix evaluator. Nonsquare inputs are rejected; singular inverses remain domain errors, and inverse notation may normalize to a matrix power of −1 during LaTeX exchange.
+
+3D surfaces now use a bounded curvature heuristic: a fully valid 65×65 grid is resampled at 129×129 when normalized second differences exceed 0.02. This is one global refinement level, performed entirely in Rust; it is not a local adaptive mesh or an error certificate. Coarse-grid aliasing can still miss narrow features. Domain holes retain the existing masking behavior.
+
+Surface refinement also probes cell centers against bilinear corner interpolation (up to 4096 extra evaluations). This helps detect oscillations aligned with the base lattice and undefined interior points. A relative interpolation discrepancy above 2% of the sampled height span triggers the same bounded refinement, with a floating-point rounding guard. It is still a heuristic, not a guarantee against aliasing or singularities.
+
+The final surface mesh also checks each cell center before emitting triangles or wire lines. Detected undefined/nonfinite/out-of-range interiors remain holes even when all corners are valid. This adds at most 16384 center evaluations per final surface; grid sample/omission counters still describe lattice points, not interior probes. Holes away from the probes can still be missed.
+
+Core source fingerprint v2 also covers the embedded Python CAS worker, so changes to its computation/protocol code are detected even when Rust sources are unchanged. Installed Python and SymPy contents are not fingerprinted.
+
+Exact symbolic integration now also handles sin, cos and exp of rational affine arguments, such as `sin(2*x+1)` or `exp(x/3-1/2)`. The inverse chain-rule factor remains rational. Nonlinear arguments and unknown symbolic slopes remain unsupported; indefinite results retain the arbitrary-constant condition.
+
+Elementary primitives also support exact rational constant factors and division by nonzero rational constants, for example `3*sin(2*x+1)` and `cos(3*x)/5`. Variable-dependent products/denominators are not covered by this rule.

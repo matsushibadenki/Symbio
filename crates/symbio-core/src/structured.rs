@@ -320,8 +320,9 @@ fn primitive(g: &mut Graph, id: Id, var: &str) -> Result<Id> {
     }
     match g.nodes[id].clone() {
         Node::Call(f, arg)
-            if matches!(&g.nodes[arg],Node::Symbol(s) if s==var)
-                && ["sin", "cos", "exp"].contains(&f.as_str()) =>
+            if ["sin", "cos", "exp"].contains(&f.as_str())
+                && algebra::polynomial(g, arg, var, 0)
+                    .is_ok_and(|p| p.keys().next_back() == Some(&1)) =>
         {
             let root = g.intern(Node::Call(
                 if f == "sin" {
@@ -334,12 +335,21 @@ fn primitive(g: &mut Graph, id: Id, var: &str) -> Result<Id> {
                 .into(),
                 arg,
             ))?;
-            if f == "sin" {
-                let minus = g.number(-1)?;
-                g.intern(Node::Mul(minus, root))
-            } else {
-                Ok(root)
+            let slope = algebra::polynomial(g, arg, var, 0)?[&1].clone();
+            if slope.is_zero() {
+                return Err(Error::Unsupported("zero affine slope".into()));
             }
+            let divisor = g.rat(if f == "sin" { -slope } else { slope })?;
+            g.intern(Node::Div(root, divisor))
+        }
+        Node::Mul(x, y) if g.value(x).is_some() || g.value(y).is_some() => {
+            let (constant, body) = if g.value(x).is_some() { (x, y) } else { (y, x) };
+            let body = primitive(g, body, var)?;
+            g.intern(Node::Mul(constant, body))
+        }
+        Node::Div(body, denominator) if g.value(denominator).is_some_and(|v| !v.is_zero()) => {
+            let body = primitive(g, body, var)?;
+            g.intern(Node::Div(body, denominator))
         }
         Node::Add(x, y) | Node::Sub(x, y) => {
             let sub = matches!(g.nodes[id], Node::Sub(..));
@@ -356,7 +366,7 @@ fn primitive(g: &mut Graph, id: Id, var: &str) -> Result<Id> {
             g.intern(Node::Mul(id, x))
         }
         _ => Err(Error::Unsupported(
-            "integral: rational polynomial or sin(x), cos(x), exp(x)".into(),
+            "integral: rational polynomial or sin/cos/exp of rational affine arguments".into(),
         )),
     }
 }
@@ -772,4 +782,46 @@ pub fn has_indefinite_integral(g: &Graph, root: Id) -> bool {
         }
     }
     false
+}
+
+#[cfg(test)]
+mod affine_primitive_tests {
+    use super::*;
+    #[test]
+    fn affine_primitives_differentiate_back_to_the_integrand() {
+        for source in [
+            "sin(2*x+1)",
+            "cos(-3*x+2)",
+            "exp(x/3-1/2)",
+            "sin(x)",
+            "3*sin(2*x+1)",
+            "cos(3*x)/5",
+            "exp(2*x)*(-2/3)",
+        ] {
+            let mut g = Graph::default();
+            let parsed = crate::parser::parse(&mut g, source).unwrap();
+            let root = algebra::simplify(&mut g, parsed, &BTreeMap::new()).unwrap();
+            let antiderivative = primitive(&mut g, root, "x").unwrap();
+            let derivative =
+                algebra::differentiate(&mut g, antiderivative, "x", &BTreeMap::new()).unwrap();
+            for x in [-0.7, 0.0, 0.4, 1.2] {
+                let values = BTreeMap::from([("x".into(), x)]);
+                let expected = g.numeric(root, &values).unwrap();
+                assert!(
+                    (g.numeric(derivative, &values).unwrap() - expected).abs() < 1e-12,
+                    "{source}"
+                );
+            }
+        }
+    }
+    #[test]
+    fn nonlinear_and_unknown_slopes_remain_unsupported() {
+        for source in [
+            "sin(x^2)", "cos(a*x)", "exp(1/x)", "x*sin(x)", "sin(x)/x", "sin(x)/0",
+        ] {
+            let mut g = Graph::default();
+            let root = crate::parser::parse(&mut g, source).unwrap();
+            assert!(primitive(&mut g, root, "x").is_err());
+        }
+    }
 }
