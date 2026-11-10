@@ -126,6 +126,7 @@ function notebook(){const out=el('div',{class:'content notebook'});if(api)out.ap
  configure:(models,runtime)=>invoke('configure',{models,runtime,generation}),
  updateInk:(ink,revision)=>invoke('ink_update',{ink,revision,generation}),
  recognize:revision=>invoke('recognize',{revision,generation}),
+ cancelRecognition:revision=>invoke('handwriting_cancel',{revision,generation}),
  preview:source=>invoke('preview_latex',{source,generation}),
  pending:value=>{inkPending=value;publishDrafts()},
  commit:async source=>{await flushDrafts();let i=1;while(current.cells.some(c=>c.name==='ink'+i))i++;await mutate({method:'math.define_latex',id:null,name:'ink'+i,source});}

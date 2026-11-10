@@ -1,7 +1,7 @@
 //! Thin Symbio adapter; the recognizer crate has no Tauri/document dependency.
 use super::{Shared, UiError, authorize, error};
 use std::{path::Path, sync::Mutex};
-use symbio_handwriting::{Ink, Recognition, Recognizer};
+use symbio_handwriting::{CancellationToken, Cancelled, Ink, Recognition, Recognizer};
 use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 
@@ -49,6 +49,7 @@ pub async fn handwriting_pick_path(
 #[derive(Default)]
 pub struct State {
     engine: Mutex<Option<Recognizer>>,
+    job: Mutex<Option<(u64, u64, CancellationToken)>>,
     ink: Mutex<Option<(u64, u64, Ink)>>,
 }
 #[tauri::command]
@@ -106,6 +107,18 @@ pub async fn recognize(
 ) -> Result<Recognition, UiError> {
     authorize(&webview)?;
     let app = webview.app_handle().clone();
+    // Register before scheduling so cancellation also reaches a queued worker.
+    let cancel = CancellationToken::default();
+    {
+        let shared = app.state::<Shared>();
+        let session = shared.0.lock().map_err(|_| error("internal_error"))?;
+        session.check_generation(generation)?;
+        let state = app.state::<State>();
+        let mut job = state.job.lock().map_err(|_| error("internal_error"))?;
+        if let Some((_, _, previous)) = job.replace((generation, revision, cancel.clone())) {
+            previous.cancel();
+        }
+    }
     tauri::async_runtime::spawn_blocking(move || {
         app.state::<Shared>()
             .0
@@ -130,11 +143,19 @@ pub async fn recognize(
             .map_err(|_| error("internal_error"))?
             .as_mut()
             .ok_or_else(|| error("handwriting_unavailable"))?
-            .recognize_candidates(&ink)
+            .recognize_candidates_with_cancel(&ink, &cancel)
             .map_err(|e| UiError {
-                code: "handwriting_error".into(),
+                code: if e.is::<Cancelled>() {
+                    "handwriting_cancelled"
+                } else {
+                    "handwriting_error"
+                }
+                .into(),
                 detail: e.to_string(),
             })?;
+        if cancel.is_cancelled() {
+            return Err(error("handwriting_cancelled"));
+        }
         app.state::<Shared>()
             .0
             .lock()
@@ -152,6 +173,27 @@ pub async fn recognize(
     })
     .await
     .map_err(|_| error("internal_error"))?
+}
+
+#[tauri::command]
+pub fn handwriting_cancel(
+    webview: tauri::Webview,
+    revision: u64,
+    generation: u64,
+) -> Result<(), UiError> {
+    authorize(&webview)?;
+    let shared = webview.state::<Shared>();
+    let session = shared.0.lock().map_err(|_| error("internal_error"))?;
+    session.check_generation(generation)?;
+    let state = webview.state::<State>();
+    let job = state.job.lock().map_err(|_| error("internal_error"))?;
+    if let Some((g, r, token)) = job.as_ref()
+        && *g == generation
+        && *r == revision
+    {
+        token.cancel();
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -178,6 +220,14 @@ pub fn ink_update(
         .is_some_and(|(g, r, _)| *g == generation && *r >= revision)
     {
         return Err(error("revision_conflict"));
+    }
+    if let Some((_, _, token)) = state
+        .job
+        .lock()
+        .map_err(|_| error("internal_error"))?
+        .as_ref()
+    {
+        token.cancel();
     }
     *slot = Some((generation, revision, ink));
     Ok(())

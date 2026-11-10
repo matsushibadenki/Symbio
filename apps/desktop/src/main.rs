@@ -398,6 +398,7 @@ fn main() {
             handwriting::handwriting_pick_path,
             handwriting::handwriting_settings,
             handwriting::recognize,
+            handwriting::handwriting_cancel,
             handwriting::ink_update,
             reveal_notebook,
             preview_latex,

@@ -13,7 +13,7 @@ The small local model is fallible: a straight handwritten line was recognized as
 - `apps/desktop/ui/handwriting.js`: host-independent editor shell with callbacks for model configuration, ink update, recognition, preview, commit and pending-draft notification. It imports locally vendored MathLive; no CDN is required. SVG is the low-volume input feedback, while image/tensor work stays Rust-side. Port this shell, its `.ink-*` stylesheet and MathLive assets together, or supply another frontend against the Rust crate.
 - The host calls the same `math.define_latex` transaction used elsewhere. Confirmed LaTeX, SEG and calculated output use normal saving/undo. The recognition model is not a mathematical authority. Input and inference are separate from notebook edits.
 
-Input has bounded strokes/points; normalized tensors do not cross IPC. UI requests carry ink revisions; stale preview replies are ignored. Pending ink/candidate drafts use the existing draft guard. Closing the dialog discards the transient ink/candidate. Model loading and inference run on blocking workers, not the UI thread. General request cancellation, original-ink persistence and confidence calibration remain future work. Desktop recognition uses the reusable width-three beam search; greedy decoding remains available to SDK consumers.
+Input has bounded strokes/points; normalized tensors do not cross IPC. UI requests carry ink revisions; stale preview replies are ignored. Pending ink/candidate drafts use the existing draft guard. Closing the dialog discards the transient ink/candidate and requests cancellation of active recognition. Model loading and inference run on blocking workers, not the UI thread. Original-ink persistence and confidence calibration remain future work. Recognition supports cooperative cancellation between native inference calls; model loading itself is not cancellable. Desktop recognition uses the reusable width-three beam search; greedy decoding remains available to SDK consumers.
 
 ## Development setup
 
@@ -62,3 +62,11 @@ python3 scripts/smoke-handwriting.py /absolute/models /absolute/runtime/library 
 ```
 
 For the owned `x-plus-one` fixture, the tested model returned `x + 1`, `X + 1` and `X + l`. This illustrates correctable ambiguity, not an accuracy benchmark. Three synthetic fixtures retained the expected top candidate in both greedy and beam modes.
+
+## Recognition cancellation
+
+The stop icon is enabled while recognition is pending. Stop, or Escape during recognition, invalidates pending suggestions and requests cancellation; controls return when the worker acknowledges it. A native encoder/decoder call already running is allowed to finish, so cancellation is cooperative rather than immediate ONNX termination. Closing the editor also cancels its active recognition and clears the Rust ink snapshot. Cancellation does not insert or alter notebook cells. A late successful reply is ignored even if a host cannot cancel computation.
+
+Reusable hosts can clone `CancellationToken`, pass it to `Recognizer::recognize_candidates_with_cancel`, and call `cancel()` from another thread. Cancellation returns the typed `Cancelled` error. Tokens are single-use; use a fresh token for a retry. Tauri registers its request token before scheduling the blocking worker, cancels superseded requests and scopes explicit cancellation to document generation/ink revision. Model configuration/loading and native file dialogs are outside this cancellation API.
+
+The standalone example's `--cancel` mode verifies a pre-cancelled request is rejected and that the same loaded recognizer can run a fresh recognition. This complements synthetic search cancellation tests; it does not measure interruption latency inside native ONNX calls.

@@ -1,7 +1,7 @@
 let inkRevision=Date.now();
 // Reusable editor shell: host supplies recognition, validation and commit adapters.
 // Only input gestures and editable LaTeX live here; tensors/model execution stay native.
-export async function openHandwriting({translate:t, configure, readSettings, pickPath, updateInk, recognize, preview, commit, pending, generationValid}) {
+export async function openHandwriting({translate:t, configure, readSettings, pickPath, updateInk, recognize, cancelRecognition, preview, commit, pending, generationValid}) {
  await import('./vendor/mathlive/mathlive.min.mjs');
  const Mathfield=customElements.get('math-field');
  Mathfield.fontsDirectory=new URL('./vendor/mathlive/fonts',import.meta.url).href;
@@ -25,15 +25,16 @@ export async function openHandwriting({translate:t, configure, readSettings, pic
  const undo=make('button',{type:'button','aria-label':t('undo'),title:t('undo')},'↶');
  const clear=make('button',{type:'button','aria-label':t('handwriting_clear'),title:t('handwriting_clear')},'⌫');
  const infer=make('button',{type:'button',class:'primary'},t('handwriting_recognize'));
- tools.append(undo,clear,infer);
+ const stop=make('button',{type:'button',disabled:'',title:t('handwriting_cancel'),'aria-label':t('handwriting_cancel')},'■');
+ tools.append(undo,clear,infer,stop);
  const choices=make('div',{class:'ink-candidates',role:'group','aria-label':t('handwriting_candidates')});
  const editor=make('math-field',{'virtual-keyboard-mode':'manual','aria-label':t('handwriting_candidate')});
  const source=make('textarea',{'aria-label':t('latex'),rows:'2',spellcheck:'false'});
  const math=make('div',{class:'ink-preview'});
  const add=make('button',{type:'button',class:'primary',disabled:''},t('handwriting_insert'));
  dialog.append(head,settings,svg,tools,choices,editor,source,math,status,add);document.body.append(dialog);
- let strokes=[],active=null,revision=++inkRevision,epoch=0,valid=false,queue=Promise.resolve(),working=false,closed=false;
- const report=e=>{status.textContent=e?.detail||e?.message||String(e)};
+ let strokes=[],active=null,revision=++inkRevision,epoch=0,valid=false,queue=Promise.resolve(),working=false,closed=false,recognizing=false,cancelRequested=false;
+ const report=e=>{if(closed)return;if((cancelRequested&&recognizing)||e?.code==='handwriting_cancelled'){status.textContent=t('handwriting_cancelled');return;}status.textContent=e?.detail||e?.message||String(e)};
  const invalidate=()=>{choices.replaceChildren();++epoch;valid=false;add.disabled=true;if(source.value)status.textContent=t('handwriting_stale')};
  const dirty=()=>pending(strokes.length>0||source.value.length>0);
  const redraw=()=>{svg.replaceChildren();for(const stroke of strokes){const path=document.createElementNS(svg.namespaceURI,'path');path.setAttribute('d',stroke.map((p,i)=>(i?'L':'M')+p.x+','+p.y).join(' '));svg.append(path)}};
@@ -51,7 +52,9 @@ export async function openHandwriting({translate:t, configure, readSettings, pic
  const browse=(kind,input)=>run(async()=>{const path=await pickPath(kind);if(!closed&&path&&generationValid())input.value=path;status.textContent=''});
  browseModels.onclick=()=>browse('models',models);browseRuntime.onclick=()=>browse('runtime',runtime);
  load.onclick=()=>run(async()=>{await configure(models.value,runtime.value);settings.open=false;status.textContent=t('ready')});
- infer.onclick=()=>run(async()=>{await queue;if(!strokes.length)return;const token=epoch;const r=revision;const result=await recognize(r);if(closed||token!==epoch||!generationValid())return;choices.replaceChildren();const candidates=(result.candidates?.length?result.candidates:[result]).slice(0,3);
+ const requestCancel=()=>{if(!recognizing||cancelRequested)return;cancelRequested=true;invalidate();stop.disabled=true;status.textContent=t('handwriting_cancelling');return cancelRecognition?.(revision).catch(report)};
+ stop.onclick=requestCancel;
+ infer.onclick=()=>run(async()=>{cancelRequested=false;recognizing=true;stop.disabled=false;try{await queue;if(cancelRequested||closed||!strokes.length)return;const token=epoch;const r=revision;const result=await recognize(r);if(closed||token!==epoch||!generationValid())return;choices.replaceChildren();const candidates=(result.candidates?.length?result.candidates:[result]).slice(0,3);
  const choose=async candidate=>{editor.value=candidate.latex;await validate(candidate.latex);if(!closed)status.textContent=(candidate.complete?'':t('handwriting_incomplete')+' · ')+result.elapsed_ms+' ms'};
  for(const [i,candidate] of candidates.entries()){
   const button=make('button',{type:'button',title:t('handwriting_candidates_help'),'aria-label':t('handwriting_candidate')+' '+(i+1)},String(i+1));
@@ -59,10 +62,10 @@ export async function openHandwriting({translate:t, configure, readSettings, pic
   button.onclick=()=>{if(working||closed||revision!==r||!generationValid())return;for(const b of choices.children)b.setAttribute('aria-pressed',String(b===button));return choose(candidate)};
   button.setAttribute('aria-pressed',String(i===0));choices.append(button);
  }
- await choose(candidates[0]);});
+ await choose(candidates[0]);}finally{recognizing=false;stop.disabled=true;if(cancelRequested&&!closed)status.textContent=t('handwriting_cancelled')}});
  add.onclick=()=>run(async()=>{if(!valid||active!==null||!generationValid())return;await commit(editor.value);strokes=[];source.value='';pending(false);dialog.close()});
- close.onclick=()=>dialog.close();dialog.addEventListener('cancel',e=>{if(working){e.preventDefault();return;}});
- dialog.addEventListener('close',()=>{closed=true;++epoch;pending(false);updateInk({strokes:[]},revision=++inkRevision).catch(()=>{});dialog.remove()});
+ close.onclick=()=>dialog.close();dialog.addEventListener('cancel',e=>{if(recognizing){e.preventDefault();requestCancel();return;}if(working)e.preventDefault()});
+ dialog.addEventListener('close',()=>{requestCancel();closed=true;++epoch;pending(false);updateInk({strokes:[]},revision=++inkRevision).catch(()=>{});dialog.remove()});
  dialog.showModal();
  if(readSettings)try{const saved=await readSettings();if(!closed){models.value=saved.models||'';runtime.value=saved.runtime||'';}}catch(e){report(e)}
 }

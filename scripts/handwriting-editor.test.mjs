@@ -63,3 +63,25 @@ test('a candidate button retained by a stale event cannot restore changed ink',a
  await write(f);await f.infer.onclick();const choices=f.elements.find(e=>e.attrs.class==='ink-candidates');const stale=choices.children[1];
  await write(f);assert.equal(choices.children.length,0);await stale.onclick();assert.equal(f.add.disabled,true);assert.equal(f.source.value,'x');
 });
+
+test('cancelled recognition cannot restore suggestions even if the host returns success',async()=>{
+ let resolve;const cancellations=[];let attempt=0;
+ const f=await fixture({cancelRecognition:async revision=>cancellations.push(revision),recognize:()=>++attempt===1?new Promise(r=>resolve=r):Promise.resolve({latex:'y',complete:true,elapsed_ms:1})});
+ await write(f);const job=f.infer.onclick();await tick();
+ const stop=f.byLabel('handwriting_cancel');assert.equal(stop.disabled,false);await stop.onclick();assert.equal(stop.disabled,true);
+ resolve({latex:'stale',complete:true,elapsed_ms:10});await job;
+ assert.equal(cancellations.length,1);assert.equal(f.source.value,'');assert.equal(f.add.disabled,true);
+ assert.equal(f.elements.find(e=>e.attrs.class==='ink-candidates').children.length,0);
+ await f.infer.onclick();assert.equal(f.source.value,'y');assert.equal(f.add.disabled,false);
+});
+test('cancelling while ink update is queued avoids starting inference',async()=>{
+ let release;let recognized=0;const f=await fixture({updateInk:()=>new Promise(r=>release=r),recognize:async()=>{recognized++;return {latex:'x'}}});
+ await write(f);const job=f.infer.onclick();await tick();await f.byLabel('handwriting_cancel').onclick();release();await job;
+ assert.equal(recognized,0);assert.equal(f.add.disabled,true);
+});
+test('closing during inference requests cancellation and ignores the late result',async()=>{
+ let resolve;let cancelled=0;const f=await fixture({cancelRecognition:async()=>cancelled++,recognize:()=>new Promise(r=>resolve=r)});
+ await write(f);const job=f.infer.onclick();await tick();f.byLabel('close').onclick();
+ resolve({latex:'late',complete:true,elapsed_ms:1});await job;
+ assert.equal(cancelled,1);assert.equal(f.source.value,'');assert.deepEqual(f.calls.commit,[]);
+});

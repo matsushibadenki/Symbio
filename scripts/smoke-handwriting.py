@@ -32,3 +32,8 @@ with tempfile.TemporaryDirectory(prefix='symbio-handwriting-smoke-') as d:
   revision=response['result']['revision']
   print('PASS:',name,'→',result['latex'],'→ SEG /',result['elapsed_ms'],'ms')
 print('PASS: 3 owned synthetic stroke fixtures, native ONNX inference, clean process exit and real CLI SEG calculation')
+
+r=subprocess.run([recognizer,sys.argv[1],sys.argv[2],ROOT/'examples/handwriting/x-plus-one.json','--cancel'],capture_output=True,text=True,check=True)
+result=json.loads(r.stdout)
+assert result['cancelled'] and result['retry']['complete'] and result['retry']['latex']=='x + 1',result
+print('PASS: pre-cancelled native request rejected; same recognizer accepts a fresh retry')

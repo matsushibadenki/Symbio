@@ -2,8 +2,41 @@
 use image::{GrayImage, Luma};
 use ort::{session::Session, value::Tensor};
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, path::Path};
+use std::{
+    collections::BTreeMap,
+    path::Path,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+/// Cooperative cancellation shared with the host; no GUI/runtime dependency.
+#[derive(Clone, Default)]
+pub struct CancellationToken(Arc<AtomicBool>);
+#[derive(Debug)]
+pub struct Cancelled;
+impl std::fmt::Display for Cancelled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("recognition cancelled")
+    }
+}
+impl std::error::Error for Cancelled {}
+impl CancellationToken {
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+    fn check(&self) -> Result<()> {
+        if self.is_cancelled() {
+            Err(Box::new(Cancelled))
+        } else {
+            Ok(())
+        }
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Point {
@@ -122,12 +155,27 @@ impl Recognizer {
     }
     /// Bounded width-three search; returns at most three distinct suggestions.
     pub fn recognize_candidates(&mut self, ink: &Ink) -> Result<Recognition> {
-        self.decode_image(ink.raster()?, 3)
+        self.recognize_candidates_with_cancel(ink, &CancellationToken::default())
+    }
+    /// Stops between native ONNX calls; an in-flight call is allowed to finish.
+    pub fn recognize_candidates_with_cancel(
+        &mut self,
+        ink: &Ink,
+        cancel: &CancellationToken,
+    ) -> Result<Recognition> {
+        cancel.check()?;
+        self.decode_image(ink.raster()?, 3, cancel)
     }
     pub fn recognize_image(&mut self, image: GrayImage) -> Result<Recognition> {
-        self.decode_image(image, 1)
+        self.decode_image(image, 1, &CancellationToken::default())
     }
-    fn decode_image(&mut self, image: GrayImage, width: usize) -> Result<Recognition> {
+    fn decode_image(
+        &mut self,
+        image: GrayImage,
+        width: usize,
+        cancel: &CancellationToken,
+    ) -> Result<Recognition> {
+        cancel.check()?;
         let start = std::time::Instant::now();
         if !image.as_raw().iter().any(|v| *v > 0) {
             return Err("empty ink image".into());
@@ -137,6 +185,7 @@ impl Recognizer {
             return Err("normalized image shape".into());
         }
         let pixels: Vec<f32> = image.as_raw().iter().map(|v| *v as f32 / 255.).collect();
+        cancel.check()?;
         let encoded=self.encoder.run(ort::inputs!{
             "pixel_values" => Tensor::from_array(([1,1,h as usize,w as usize], pixels))?,
             "pixel_mask" => Tensor::from_array(([1,h as usize,w as usize], (0..h).flat_map(|y| (0..w).map(move |_| y >= 128)).collect::<Vec<bool>>()))?
@@ -145,7 +194,9 @@ impl Recognizer {
         let features = Tensor::from_array((shape.to_vec(), data.to_vec()))?;
         let (shape, data) = encoded["encoder_mask"].try_extract_tensor::<bool>()?;
         let mask = Tensor::from_array((shape.to_vec(), data.to_vec()))?;
+        cancel.check()?;
         let beams = search(width, |ids| {
+            cancel.check()?;
             let result = self.decoder.run(ort::inputs! {
                 "encoder_features" => &features, "encoder_mask" => &mask,
                 "input_ids" => Tensor::from_array(([1,ids.len()],ids.to_vec()))?
@@ -156,6 +207,7 @@ impl Recognizer {
                 .ok_or("decoder shape")?
                 .to_vec())
         })?;
+        cancel.check()?;
         let mut candidates = Vec::new();
         for beam in beams {
             let ids = &beam.ids[1..];
@@ -189,7 +241,7 @@ impl Recognizer {
         })
     }
 }
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct Beam {
     ids: Vec<i64>,
     score: f64,
@@ -256,6 +308,26 @@ fn search(width: usize, mut logits: impl FnMut(&[i64]) -> Result<Vec<f32>>) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cloned_token_cancels_across_threads_and_stops_search() {
+        let token = CancellationToken::default();
+        let worker = token.clone();
+        assert!(token.check().is_ok());
+        std::thread::spawn(move || worker.cancel()).join().unwrap();
+        assert!(token.check().unwrap_err().is::<Cancelled>());
+        let token = CancellationToken::default();
+        let mut calls = 0;
+        let result = search(3, |_| {
+            token.check()?;
+            calls += 1;
+            token.cancel();
+            let mut scores = vec![-100.; 113];
+            scores[3] = 10.;
+            Ok(scores)
+        });
+        assert!(result.unwrap_err().is::<Cancelled>());
+        assert_eq!(calls, 1);
+    }
     #[test]
     fn beam_can_recover_a_better_sequence_than_greedy() {
         let decode = |ids: &[i64]| {
