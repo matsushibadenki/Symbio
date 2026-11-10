@@ -38,6 +38,14 @@ Symbio is an early reproducible derivation and research notebook built with Taur
 
 ![Symbio desktop](docs/screenshots/workspace-ja.png)
 
+**3D visualization** — A Rust/wgpu-rendered surface with labeled axes, tick marks and independent x/y ranges.
+
+![Symbio 3D surface workspace](docs/screenshots/surface-3d-ja.jpg)
+
+**Handwritten formula input** — Native handwriting recognition, an editable MathLive formula and a Rust-backed preview before explicit insertion and calculation.
+
+![Symbio handwriting input and formula preview](docs/screenshots/handwriting-ja.jpg)
+
 ## Build and run
 
 Generate the unsigned macOS development app locally. Rust/Cargo, Xcode Command Line Tools and Python 3 are required. No Node/npm frontend build is needed.
