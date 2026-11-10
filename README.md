@@ -1,5 +1,30 @@
 # Symbio · Symbolic Intelligence Workbench
 
+## License and third-party components
+
+Symbio's original application code is licensed under the **MIT License**; see [LICENSE](LICENSE) for the full terms. MIT permits use, copying, modification, distribution, sublicensing and commercial use, provided the copyright and permission notices are retained in copies or substantial portions. The software is provided "AS IS", without warranty, and the authors disclaim liability as stated in the license.
+
+Third-party components retain their own copyrights and licenses. Symbio's MIT license does not replace those terms. The following inventory covers the direct external Rust dependencies of the current workspace, the bundled formula editor/fonts and the optional handwriting runtime. Versions are recorded in `Cargo.lock` or the vendored asset provenance.
+
+| Component | License | Notice / distribution terms |
+| --- | --- | --- |
+| MathLive 0.111.4 | MIT | Preserve Arno Gourdol's copyright and the [bundled license](apps/desktop/ui/vendor/mathlive/LICENSE.txt). |
+| KaTeX assets/fonts bundled with MathLive | MIT | Preserve Khan Academy and contributors' copyright and the [bundled license](apps/desktop/ui/vendor/mathlive/KaTeX-LICENSE.txt). |
+| ONNX Runtime 1.23.2 (optional local native library) | MIT | Preserve Microsoft Corporation's copyright, license and any accompanying third-party notices when distributing the runtime. The runtime is not bundled in this repository. |
+| `ort` 2.0.0-rc.11 and its `ort-sys` binding | MIT OR Apache-2.0 | Alternative licenses; retain the applicable upstream license and notices. |
+| `image` 0.25.10 | MIT OR Apache-2.0 | Alternative licenses; retain the applicable upstream license and notices. |
+| `tauri`, `tauri-build`, `tauri-plugin-dialog` | Apache-2.0 OR MIT | Alternative licenses; retain the applicable upstream license and notices. |
+| `wgpu`, `naga`, `num-bigint`, `num-rational`, `num-traits`, `serde`, `serde_json`, `sha2`, `tempfile`, `thiserror`, `uuid` | MIT OR Apache-2.0 | Alternative licenses; retain the applicable upstream license and notices. |
+| `pollster` | Apache-2.0 / MIT (upstream dual-license declaration) | Retain the applicable upstream license and notices. |
+| `bytemuck`, `objc2-app-kit` | Zlib OR Apache-2.0 OR MIT | Alternative licenses; retain the applicable upstream license and notices. |
+| `quick-xml` | MIT | Retain the upstream copyright and permission notice. |
+
+For Apache-2.0 distributions, include the license, retain required attribution and any applicable NOTICE content, and identify modified files. Apache-2.0 includes an express patent license and patent-litigation termination provisions. For the Zlib option, do not misrepresent the origin, mark altered source versions, and retain the notice in source distributions. Full upstream license texts govern; this table is a summary, not a replacement.
+
+Transitive dependencies and platform-specific bundled components also retain their own terms; this direct-dependency inventory is not a complete release notice bundle. Before distributing binaries, collect the licenses and required notices for the actual locked dependency graph, target platform and any separately packaged runtime. Reused ThreeX/ATOM code must retain any existing third-party attribution.
+
+**Handwriting models are separate from library licenses.** The ink-on application code is Apache-2.0, but the upstream CoMER checkpoint, training-data and derivative-weight redistribution terms have not been fully established here. Model weights are optional local development artifacts and are not distributed under Symbio's MIT license. Model redistribution clearance remains pending; see [model provenance and limitations](docs/handwriting.md).
+
 <details><summary>Earlier development screenshots</summary>
 
 <img src="docs/images/symbio-image.png">
@@ -253,3 +278,17 @@ Core source fingerprint v2 also covers the embedded Python CAS worker, so change
 Exact symbolic integration now also handles sin, cos and exp of rational affine arguments, such as `sin(2*x+1)` or `exp(x/3-1/2)`. The inverse chain-rule factor remains rational. Nonlinear arguments and unknown symbolic slopes remain unsupported; indefinite results retain the arbitrary-constant condition.
 
 Elementary primitives also support exact rational constant factors and division by nonzero rational constants, for example `3*sin(2*x+1)` and `cos(3*x)/5`. Variable-dependent products/denominators are not covered by this rule.
+
+Exact integration now handles a rational polynomial multiplied by `exp(a*x+b)` for rational `a != 0` and `b`, within the existing polynomial limits. For example, the definite integral of `x*exp(x)` from 0 to 1 is exactly 1. A rational coefficient recurrence constructs the primitive; general products and nonlinear exponential arguments remain unsupported.
+
+Exact integration also handles rational polynomials multiplied by sin/cos of rational affine arguments. A bounded rational recurrence constructs the two coefficient polynomials; examples include `x*sin(2*x)` and `(x^2+1)*cos(-3*x+1)`. General trigonometric products and nonlinear arguments remain unsupported.
+
+### Independent integral regression checks
+
+Run `python3 scripts/check-integrals-sympy.py` using an existing Python environment with SymPy. The optional test builds the real CLI, imports 24 integrals into temporary projects, converts the saved primitive SEG to SymPy through an explicit operator allowlist and checks an exact zero derivative residual. It covers rational polynomial factors through degree three and rational affine sin/cos/exp arguments. No packages are installed and no open notebook or configured CAS runtime is modified. This is bounded independent regression evidence, not a full integration benchmark or formal proof.
+
+### Handwritten formula input (local MVP)
+
+Notebook's pen button opens a single-formula handwriting pad. A reusable Rust crate runs the optional CoMER ONNX encoder/decoder locally; MathLive edits the recognized LaTeX; explicit insertion uses the existing SEG parser and exact calculation flow. Recognition is a suggestion, never an automatic document edit. Three owned stroke fixtures and a native correction-to-calculation flow were exercised. See [setup, model provenance and limits](docs/handwriting.md) and the [reusable Rust API](crates/handwriting/README.md). Model weights and runtime libraries are optional local artifacts, not redistributed here.
+
+Handwriting recognition now offers up to three typeset alternatives from bounded Rust beam search. Choosing a candidate updates the MathLive draft and Rust preview; only explicit insertion changes the notebook. Candidate ranking is not a calibrated correctness probability. SDK users can retain greedy decoding or call `recognize_candidates`; see [the recognition contract](crates/handwriting/README.md).

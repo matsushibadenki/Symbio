@@ -314,6 +314,47 @@ pub fn reduce(g: &mut Graph, id: Id, a: &Assumptions) -> Result<Id> {
     }
 }
 
+// Match P(x) F(Q(x)) only when P is exactly a rational multiple of Q'.
+fn substitution_product(
+    g: &mut Graph,
+    polynomial: Id,
+    arg: Id,
+    var: &str,
+    function: &str,
+) -> Result<Id> {
+    let p = algebra::polynomial(g, polynomial, var, 0)?;
+    let q = algebra::polynomial(g, arg, var, 0)?;
+    let derivative: BTreeMap<_, _> = q
+        .into_iter()
+        .filter(|(k, v)| *k > 0 && !v.is_zero())
+        .map(|(k, v)| (k - 1, v * Rational::from_integer(k.into())))
+        .collect();
+    let (key, value) = derivative
+        .first_key_value()
+        .ok_or_else(|| Error::Unsupported("constant substitution".into()))?;
+    let ratio = p.get(key).cloned().unwrap_or_else(Rational::zero) / value;
+    if ratio.is_zero()
+        || p.len() != derivative.len()
+        || !derivative
+            .iter()
+            .all(|(k, v)| p.get(k).is_some_and(|p| *p == v * &ratio))
+    {
+        return Err(Error::Unsupported(
+            "substitution requires proportional derivative".into(),
+        ));
+    }
+    let coefficient = g.rat(if function == "sin" { -ratio } else { ratio })?;
+    let result = g.intern(Node::Call(
+        match function {
+            "sin" => "cos",
+            "cos" => "sin",
+            _ => "exp",
+        }
+        .into(),
+        arg,
+    ))?;
+    g.intern(Node::Mul(coefficient, result))
+}
 fn primitive(g: &mut Graph, id: Id, var: &str) -> Result<Id> {
     if let Ok(root) = algebra::integrate(g, id, var) {
         return Ok(root);
@@ -350,6 +391,101 @@ fn primitive(g: &mut Graph, id: Id, var: &str) -> Result<Id> {
         Node::Div(body, denominator) if g.value(denominator).is_some_and(|v| !v.is_zero()) => {
             let body = primitive(g, body, var)?;
             g.intern(Node::Div(body, denominator))
+        }
+        Node::Mul(x, y)
+            if matches!(&g.nodes[x], Node::Call(f, _) if f == "exp")
+                || matches!(&g.nodes[y], Node::Call(f, _) if f == "exp") =>
+        {
+            let (exponential, polynomial) = if matches!(&g.nodes[x], Node::Call(f, _) if f == "exp")
+            {
+                (x, y)
+            } else {
+                (y, x)
+            };
+            let Node::Call(_, arg) = g.nodes[exponential] else {
+                unreachable!()
+            };
+            let affine = algebra::polynomial(g, arg, var, 0)?;
+            if affine.keys().next_back() != Some(&1) {
+                return substitution_product(g, polynomial, arg, var, "exp");
+            }
+            let slope = &affine[&1];
+            if slope.is_zero() {
+                return Err(Error::Unsupported("zero exponential slope".into()));
+            }
+            let p = algebra::polynomial(g, polynomial, var, 0)?;
+            let degree = p.keys().next_back().copied().unwrap_or(0);
+            let mut q = BTreeMap::new();
+            let mut next = Rational::zero();
+            for k in (0..=degree).rev() {
+                let value = (p.get(&k).cloned().unwrap_or_else(Rational::zero)
+                    - Rational::from_integer((k + 1).into()) * &next)
+                    / slope;
+                if !value.is_zero() {
+                    q.insert(k, value.clone());
+                }
+                next = value;
+            }
+            let coefficient = algebra::from_polynomial(g, &q, var)?;
+            g.intern(Node::Mul(coefficient, exponential))
+        }
+        Node::Mul(x, y)
+            if matches!(&g.nodes[x], Node::Call(f, _) if f == "sin" || f == "cos")
+                || matches!(&g.nodes[y], Node::Call(f, _) if f == "sin" || f == "cos") =>
+        {
+            let (trig, polynomial) = if matches!(&g.nodes[x], Node::Call(f, _) if f == "sin" || f == "cos")
+            {
+                (x, y)
+            } else {
+                (y, x)
+            };
+            let Node::Call(ref f, arg) = g.nodes[trig] else {
+                unreachable!()
+            };
+            let sine = f == "sin";
+            let affine = algebra::polynomial(g, arg, var, 0)?;
+            if affine.keys().next_back() != Some(&1) {
+                return substitution_product(
+                    g,
+                    polynomial,
+                    arg,
+                    var,
+                    if sine { "sin" } else { "cos" },
+                );
+            }
+            let slope = &affine[&1];
+            if slope.is_zero() {
+                return Err(Error::Unsupported("zero trigonometric slope".into()));
+            }
+            let p = algebra::polynomial(g, polynomial, var, 0)?;
+            let mut a = BTreeMap::new();
+            let mut b = BTreeMap::new();
+            let (mut next_a, mut next_b) = (Rational::zero(), Rational::zero());
+            for k in (0..=p.keys().next_back().copied().unwrap_or(0)).rev() {
+                let weight = Rational::from_integer((k + 1).into());
+                let value = p.get(&k).cloned().unwrap_or_else(Rational::zero);
+                let ak = ((if sine {
+                    Rational::zero()
+                } else {
+                    value.clone()
+                }) - &weight * &next_b)
+                    / slope;
+                let bk = (&weight * &next_a - if sine { value } else { Rational::zero() }) / slope;
+                if !ak.is_zero() {
+                    a.insert(k, ak.clone());
+                }
+                if !bk.is_zero() {
+                    b.insert(k, bk.clone());
+                }
+                (next_a, next_b) = (ak, bk);
+            }
+            let a = algebra::from_polynomial(g, &a, var)?;
+            let b = algebra::from_polynomial(g, &b, var)?;
+            let sin = g.intern(Node::Call("sin".into(), arg))?;
+            let cos = g.intern(Node::Call("cos".into(), arg))?;
+            let left = g.intern(Node::Mul(a, sin))?;
+            let right = g.intern(Node::Mul(b, cos))?;
+            g.intern(Node::Add(left, right))
         }
         Node::Add(x, y) | Node::Sub(x, y) => {
             let sub = matches!(g.nodes[id], Node::Sub(..));
@@ -797,6 +933,15 @@ mod affine_primitive_tests {
             "3*sin(2*x+1)",
             "cos(3*x)/5",
             "exp(2*x)*(-2/3)",
+            "x*exp(2*x)",
+            "x*sin(2*x)",
+            "x*exp(x^2)",
+            "x*cos(x^2+1)",
+            "(3*x^2+2)*sin(x^3+2*x)",
+            "(x^2+1)*cos(-3*x+1)",
+            "sin(x/2)*(x^3-x)",
+            "(x^3+2*x-1)*exp(-3*x+1)",
+            "exp(x/2)*(x^2+1)",
         ] {
             let mut g = Graph::default();
             let parsed = crate::parser::parse(&mut g, source).unwrap();
@@ -817,7 +962,12 @@ mod affine_primitive_tests {
     #[test]
     fn nonlinear_and_unknown_slopes_remain_unsupported() {
         for source in [
-            "sin(x^2)", "cos(a*x)", "exp(1/x)", "x*sin(x)", "sin(x)/x", "sin(x)/0",
+            "sin(x^2)",
+            "cos(a*x)",
+            "exp(1/x)",
+            "x^2*sin(x^2)",
+            "sin(x)/x",
+            "sin(x)/0",
         ] {
             let mut g = Graph::default();
             let root = crate::parser::parse(&mut g, source).unwrap();

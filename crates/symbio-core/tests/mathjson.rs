@@ -530,3 +530,27 @@ fn inverse_matrix_exchange_keeps_exact_values_and_domain_failures() {
         assert!(import(&serde_json::to_vec(&v).unwrap()).is_err());
     }
 }
+
+#[test]
+fn polynomial_exponential_integrals_compute_exact_definite_values() {
+    let body = json!(["Multiply", "x", ["Exp", "x"]]);
+    for (lower, upper, expected) in [(0, 1, "1"), (1, 0, "-1"), (1, 1, "0")] {
+        let c = load(json!(["Integrate", body, ["Tuple", "x", lower, upper]]));
+        assert_eq!(c.snapshot().cells[0].result_text.as_deref(), Some(expected));
+        let exchange = export(c.project(), 1).unwrap();
+        let copy = import(&to_bytes(&exchange).unwrap()).unwrap();
+        assert_eq!(
+            c.snapshot().cells[0].result_text,
+            copy.snapshot().cells[0].result_text
+        );
+    }
+    let c = load(json!([
+        "Integrate",
+        ["Multiply", ["Power", "x", 2], ["Exp", ["Power", "x", 2]]],
+        "x"
+    ]));
+    assert_eq!(
+        c.snapshot().cells[0].cell.calculation_error.as_deref(),
+        Some("unsupported")
+    );
+}

@@ -45,3 +45,6 @@ Thumbs.db
 Desktop.ini
 
 # Cargo.lock is intentionally tracked for reproducible application builds.
+
+# Local optional inference artifacts; downloaded models/runtime are not redistributed
+/.local/

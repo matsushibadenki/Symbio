@@ -1,3 +1,4 @@
+import {openHandwriting} from './handwriting.js';
 import {compareDocumentSnapshot} from './document-state.js';
 import {t,setLocale,locale} from './i18n.js';
 import {icon} from './icons.js';
@@ -15,8 +16,9 @@ let graphEditing=null,comparisonTarget=null,reproductionReport=null,reproduction
 const expandedEditors=new Set(),expandedSections=new Set();let revealCell=null;
 let dependencyZoom=view==='dependencies'?1.6:1;
 let keyboard=null;const notePreviews=new Set();
+let inkPending=false;
 const drafts=new Map();let draftQueue=Promise.resolve();
-function pendingDrafts(){return current?.cells.some(c=>["name","source","source_format","note"].some(k=>drafts.get(c.id)?.[k]!==undefined&&drafts.get(c.id)[k]!==c[k]))||false}
+function pendingDrafts(){return inkPending||current?.cells.some(c=>["name","source","source_format","note"].some(k=>drafts.get(c.id)?.[k]!==undefined&&drafts.get(c.id)[k]!==c[k]))||false}
 function publishDrafts(){if(api){const pending=pendingDrafts();draftQueue=draftQueue.catch(()=>{}).then(()=>invoke("set_draft",{pending}));}return draftQueue}
 async function flushDrafts(){for(const c of [...current.cells]){await commit(c);const note=drafts.get(c.id)?.note;if(note!==undefined&&note!==c.note){await mutate({method:"math.note",id:c.id,text:note});delete drafts.get(c.id).note;}}await publishDrafts();}
 export function el(tag,attrs={},...children){const n=document.createElement(tag);for(const [key,val]of Object.entries(attrs)){if(key==='class')n.className=val;else if(key.startsWith('on'))n.addEventListener(key.slice(2),val);else if(key==='text')n.textContent=val;else if(key==='value')n.value=val;else if(key==='checked')n.checked=val;else if(val!==null)n.setAttribute(key,String(val));}for(const c of children.flat()){if(c!==null&&c!==undefined)n.append(typeof c==='string'?document.createTextNode(c):c)}return n}
@@ -116,7 +118,19 @@ function assumptionForm(symbol,a,inferred=false){
 function sectionKey(name){return `${current.active_document??current.project_id}:${current.active}:${name}`}
 function disclosure(name,title,...children){const key=sectionKey(name);const details=el('details',{class:'inspector-disclosure',...(expandedSections.has(key)?{open:''}:{})},el('summary',{},title),...children);details.addEventListener('toggle',()=>{if(details.open)expandedSections.add(key);else expandedSections.delete(key)});return details;}
 async function selectCell(id){await mutate({method:'math.select',id});revealCell=id;if(['objects','inspector','dependencies'].includes(view)&&layout)applyLayout(await invoke('reveal_notebook',{generation:current.generation}));}
-function notebook(){const out=el('div',{class:'content notebook'});if(!current.cells.length)out.append(el('div',{class:'empty',text:t('empty')}));for(const c of current.cells)out.append(cell(c));return out}
+function notebook(){const out=el('div',{class:'content notebook'});if(api)out.append(el('div',{class:'ink-launch'},button('handwriting','edit',()=>action(async()=>{
+ const generation=current.generation;
+ await openHandwriting({translate:t,generationValid:()=>current.generation===generation,
+ readSettings:()=>invoke('handwriting_settings'),
+ pickPath:kind=>invoke('handwriting_pick_path',{kind,generation}),
+ configure:(models,runtime)=>invoke('configure',{models,runtime,generation}),
+ updateInk:(ink,revision)=>invoke('ink_update',{ink,revision,generation}),
+ recognize:revision=>invoke('recognize',{revision,generation}),
+ preview:source=>invoke('preview_latex',{source,generation}),
+ pending:value=>{inkPending=value;publishDrafts()},
+ commit:async source=>{await flushDrafts();let i=1;while(current.cells.some(c=>c.name==='ink'+i))i++;await mutate({method:'math.define_latex',id:null,name:'ink'+i,source});}
+ });
+ }))));if(!current.cells.length)out.append(el('div',{class:'empty',text:t('empty')}));for(const c of current.cells)out.append(cell(c));return out}
 function toggleKeyboard(c,kind,target){
  const start=target.selectionStart,end=target.selectionEnd;
  keyboard=keyboard?.id===c.id&&keyboard.kind===kind?null:{id:c.id,kind};render();

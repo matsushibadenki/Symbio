@@ -1,6 +1,7 @@
 mod axes3d;
 mod cas_settings;
 mod files;
+mod handwriting;
 mod layout;
 mod plot;
 mod surface3d;
@@ -355,6 +356,7 @@ fn main() {
         .manage(plot::Plot::default())
         .manage(surface3d::Surface3d::default())
         .manage(Drafts::default())
+        .manage(handwriting::State::default())
         .setup(|app| {
             app.manage(cas_settings::Settings::default());
             cas_settings::initialize(app.handle());
@@ -392,6 +394,11 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            handwriting::configure,
+            handwriting::handwriting_pick_path,
+            handwriting::handwriting_settings,
+            handwriting::recognize,
+            handwriting::ink_update,
             reveal_notebook,
             preview_latex,
             show_dependencies,

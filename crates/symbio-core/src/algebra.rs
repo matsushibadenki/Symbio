@@ -146,6 +146,14 @@ pub fn simplify(g: &mut Graph, root: Id, a: &Assumptions) -> Result<Id> {
                 match n {
                     Node::Add(..) if xv == Some(zero.clone()) => y,
                     Node::Add(..) | Node::Sub(..) if yv == Some(zero.clone()) => x,
+                    Node::Mul(..)
+                        if (xv == Some(zero.clone())
+                            && matches!(&g.nodes[y], Node::Call(f, arg) if ["sin", "cos", "exp"].contains(&f.as_str()) && g.value(*arg).is_some()))
+                            || (yv == Some(zero.clone())
+                                && matches!(&g.nodes[x], Node::Call(f, arg) if ["sin", "cos", "exp"].contains(&f.as_str()) && g.value(*arg).is_some())) =>
+                    {
+                        g.number(0)?
+                    }
                     Node::Mul(..) if xv == Some(one.clone()) => y,
                     Node::Mul(..) | Node::Div(..) if yv == Some(one.clone()) => x,
                     Node::Mul(..)

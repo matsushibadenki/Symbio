@@ -1,0 +1,9 @@
+[package]
+name = "symbio-handwriting"
+version = "0.1.0"
+edition = "2024"
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+ort = { version = "=2.0.0-rc.11", default-features = false, features = ["std", "load-dynamic"] }
+image = { version = "=0.25.10", default-features = false, features = ["png"] }
