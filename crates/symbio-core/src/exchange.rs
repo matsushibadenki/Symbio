@@ -48,6 +48,7 @@ fn prepare(input: &MathInput) -> Result<AppCore> {
         calculation_error: None,
         calculated_revision: None,
         resolved_root: None,
+        ink: None,
         note: String::new(),
     });
     project.current_mut().selected = Some(1);

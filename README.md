@@ -302,3 +302,5 @@ Notebook's pen button opens a single-formula handwriting pad. A reusable Rust cr
 Handwriting recognition now offers up to three typeset alternatives from bounded Rust beam search. Choosing a candidate updates the MathLive draft and Rust preview; only explicit insertion changes the notebook. Candidate ranking is not a calibrated correctness probability. SDK users can retain greedy decoding or call `recognize_candidates`; see [the recognition contract](crates/handwriting/README.md).
 
 Use the stop icon (or Escape during recognition) to cancel a handwriting request. Cancellation is cooperative between native ONNX calls; late results are discarded, and the current strokes can be recognized again. Model loading is not cancelled by this control.
+
+Handwritten cells save their strokes alongside the confirmed formula. Use the stroke icon on the cell to reopen the pad, then select **Update and calculate** to apply the changes to that cell.

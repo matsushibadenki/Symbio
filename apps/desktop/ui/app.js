@@ -118,9 +118,16 @@ function assumptionForm(symbol,a,inferred=false){
 function sectionKey(name){return `${current.active_document??current.project_id}:${current.active}:${name}`}
 function disclosure(name,title,...children){const key=sectionKey(name);const details=el('details',{class:'inspector-disclosure',...(expandedSections.has(key)?{open:''}:{})},el('summary',{},title),...children);details.addEventListener('toggle',()=>{if(details.open)expandedSections.add(key);else expandedSections.delete(key)});return details;}
 async function selectCell(id){await mutate({method:'math.select',id});revealCell=id;if(['objects','inspector','dependencies'].includes(view)&&layout)applyLayout(await invoke('reveal_notebook',{generation:current.generation}));}
-function notebook(){const out=el('div',{class:'content notebook'});if(api)out.append(el('div',{class:'ink-launch'},button('handwriting','edit',()=>action(async()=>{
- const generation=current.generation;
- await openHandwriting({translate:t,generationValid:()=>current.generation===generation,
+async function editHandwriting(cell) {
+ const {generation,revision}=current;
+ if(cell&&pendingDrafts())throw {code:'draft_pending'};
+ const initialInk=cell?await invoke('handwriting_cell_ink',{id:cell.id,generation,revision}):null;
+ const initialSource=cell?.source_format==='expression'
+  ?await invoke('convert_source',{source:cell.source,fromFormat:'expression',toFormat:'latex'})
+  :cell?.source;
+ const workspaceValid=()=>current.generation===generation&&(!cell||current.revision===revision);
+ if(!workspaceValid())throw {code:'revision_conflict'};
+ await openHandwriting({translate:t,generationValid:workspaceValid,initialInk,initialSource,
  readSettings:()=>invoke('handwriting_settings'),
  pickPath:kind=>invoke('handwriting_pick_path',{kind,generation}),
  configure:(models,runtime)=>invoke('configure',{models,runtime,generation}),
@@ -129,9 +136,23 @@ function notebook(){const out=el('div',{class:'content notebook'});if(api)out.ap
  cancelRecognition:revision=>invoke('handwriting_cancel',{revision,generation}),
  preview:source=>invoke('preview_latex',{source,generation}),
  pending:value=>{inkPending=value;publishDrafts()},
- commit:async source=>{await flushDrafts();let i=1;while(current.cells.some(c=>c.name==='ink'+i))i++;await mutate({method:'math.define_latex',id:null,name:'ink'+i,source});}
+ commit:async(source,ink)=>{
+  if(!cell)await flushDrafts();
+  if(!workspaceValid())throw {code:'revision_conflict'};
+  let i=1;while(current.cells.some(c=>c.name==='ink'+i))i++;
+  const command={id:cell?.id??null,name:cell?.name??'ink'+i,source};
+  if(cell||ink.strokes.length)await mutate({method:'math.define_handwritten',...command,ink:ink.strokes.length?ink:null});
+  else await mutate({method:'math.define_latex',...command});
+ }
  });
- }))));if(!current.cells.length)out.append(el('div',{class:'empty',text:t('empty')}));for(const c of current.cells)out.append(cell(c));return out}
+}
+function notebook(){
+ const out=el('div',{class:'content notebook'});
+ if(api)out.append(el('div',{class:'ink-launch'},button('handwriting','edit',()=>action(()=>editHandwriting()))));
+ if(!current.cells.length)out.append(el('div',{class:'empty',text:t('empty')}));
+ for(const c of current.cells)out.append(cell(c));
+ return out;
+}
 function toggleKeyboard(c,kind,target){
  const start=target.selectionStart,end=target.selectionEnd;
  keyboard=keyboard?.id===c.id&&keyboard.kind===kind?null:{id:c.id,kind};render();
@@ -202,7 +223,7 @@ function cell(c){
  if(c.calculated_revision!=null)form.append(el('div',{class:'small calculation-revision',text:`${t('recalculated')} · r${c.calculated_revision}`}));
  refreshDraft();
  const edit=button('edit_cell','edit',()=>{if(editing&&draftChanged){status('draft_pending');return}if(editing)expandedEditors.delete(editorKey);else expandedEditors.add(editorKey);render();if(!editing)root.querySelector(`[data-focus="source-${c.id}"]`)?.focus();},{'aria-expanded':editing});
- return el('article',{class:'cell','data-cell':c.id,'data-selected':selected},el('div',{class:'cell-top'},el('button',{type:'button',class:'cell-number','aria-label':`${t('select_cell')} ${c.name}`,'aria-pressed':selected,onclick:()=>action(()=>selectCell(c.id)),text:String(c.id).padStart(2,'0')}),name,el('span',{class:'spacer'}),edit,button('remove','remove',()=>action(()=>mutate({method:'math.remove',id:c.id})))),form);
+ return el('article',{class:'cell','data-cell':c.id,'data-selected':selected},el('div',{class:'cell-top'},el('button',{type:'button',class:'cell-number','aria-label':`${t('select_cell')} ${c.name}`,'aria-pressed':selected,onclick:()=>action(()=>selectCell(c.id)),text:String(c.id).padStart(2,'0')}),name,el('span',{class:'spacer'}),api&&c.has_ink?button('handwriting_reedit','handwriting',()=>action(()=>editHandwriting(c))):null,edit,button('remove','remove',()=>action(()=>mutate({method:'math.remove',id:c.id})))),form);
 }
 function dependencyGraph(){
  const graph=dependencyLayout(current.cells,current.dependencies||[]),stage=el('div',{class:'dependency-stage'}),scale=view==='dependencies'?dependencyZoom:Math.min(1,Math.max(160,root.clientWidth-36)/graph.width);stage.style.width=graph.width*scale+'px';stage.style.height=graph.height*scale+'px';stage.style.setProperty('--graph-scale',String(scale));

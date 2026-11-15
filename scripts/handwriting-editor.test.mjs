@@ -26,9 +26,9 @@ async function fixture(overrides={}) {
  vm.createContext(ctx);vm.runInContext(code,ctx);
  await ctx.openHandwriting({translate:k=>k,readSettings:async()=>({models:'/models',runtime:'/runtime'}),configure:async(...args)=>calls.configure.push(args),pickPath:async kind=>{calls.pick.push(kind);return null},updateInk:async()=>{},recognize:async()=>({latex:'x+1',complete:true,elapsed_ms:20}),preview:async()=>({mathml:'<math/>'}),commit:async value=>calls.commit.push(value),pending:()=>{},generationValid:()=>true,...overrides});
  const byLabel=label=>elements.find(e=>e.attrs['aria-label']===label);
- return {calls,elements,byLabel,source:byLabel('latex'),add:elements.find(e=>e.textContent==='handwriting_insert'),infer:elements.find(e=>e.textContent==='handwriting_recognize'),svg:elements.find(e=>e.tag==='svg')};
+ return {calls,elements,byLabel,source:byLabel('latex'),add:elements.find(e=>['handwriting_insert','handwriting_update'].includes(e.textContent)),infer:elements.find(e=>e.textContent==='handwriting_recognize'),svg:elements.find(e=>e.tag==='svg')};
 }
-async function write(f){f.svg.dispatch('pointerdown',{isPrimary:true,button:0,pointerId:1,clientX:10,clientY:20,preventDefault(){}});f.svg.dispatch('pointermove',{clientX:20,clientY:30});f.svg.dispatch('pointerup');await tick()}
+async function write(f){f.svg.dispatch('pointerdown',{isPrimary:true,button:0,pointerId:1,clientX:10,clientY:20,preventDefault(){}});f.svg.dispatch('pointermove',{pointerId:1,buttons:1,clientX:20,clientY:30});f.svg.dispatch('pointerup',{pointerId:1});await tick()}
 async function correct(f){f.source.value='1+1';f.source.dispatch('input');await tick();assert.equal(f.add.disabled,false)}
 
 test('drawing and undo invalidate a previously accepted candidate',async()=>{
@@ -84,4 +84,38 @@ test('closing during inference requests cancellation and ignores the late result
  await write(f);const job=f.infer.onclick();await tick();f.byLabel('close').onclick();
  resolve({latex:'late',complete:true,elapsed_ms:1});await job;
  assert.equal(cancelled,1);assert.equal(f.source.value,'');assert.deepEqual(f.calls.commit,[]);
+});
+
+test('saved ink and LaTeX reopen together and are committed as one update',async()=>{
+ const ink={strokes:[[{x:25,y:55},{x:40,y:70}]]};
+ const commits=[],uploads=[];
+ const f=await fixture({
+  initialInk:ink,initialSource:'2+2',
+  updateInk:async value=>uploads.push(value),
+  commit:async(source,ink)=>commits.push({source,ink}),
+ });
+ await tick();
+ assert.equal(f.source.value,'2+2');
+ assert.equal(f.svg.children.length,1);
+ assert.equal(f.add.disabled,false);
+ assert.deepEqual(structuredClone(uploads[0]),ink);
+ await f.add.onclick();
+ assert.deepEqual(structuredClone(commits),[{source:'2+2',ink}]);
+});
+
+test('a missing release cannot join two primary strokes and capture loss finishes the new stroke',async()=>{
+ const updates=[];
+ const f=await fixture({updateInk:async ink=>updates.push(structuredClone(ink))});
+ const press=(x,y)=>f.svg.dispatch('pointerdown',{isPrimary:true,button:0,pointerId:1,clientX:x,clientY:y,preventDefault(){}});
+ const move=(x,y)=>f.svg.dispatch('pointermove',{pointerId:1,buttons:0,clientX:x,clientY:y});
+ press(10,20);
+ move(10,35);
+ press(120,50);
+ move(150,50);
+ f.svg.dispatch('lostpointercapture',{pointerId:1});
+ await tick();
+ assert.deepEqual(updates.at(-1).strokes,[
+  [{x:10,y:20},{x:10,y:35}],
+  [{x:120,y:50},{x:150,y:50}],
+ ]);
 });

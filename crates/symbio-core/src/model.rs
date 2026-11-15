@@ -79,6 +79,41 @@ impl Default for Calculation {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct InkPoint {
+    pub x: f32,
+    pub y: f32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CellInk {
+    pub strokes: Vec<Vec<InkPoint>>,
+}
+
+impl CellInk {
+    pub fn validate(&self) -> Result<usize> {
+        let count = self.strokes.iter().map(Vec::len).sum();
+        if self.strokes.is_empty()
+            || self.strokes.len() > 256
+            || count > 16384
+            || self.strokes.iter().any(|stroke| {
+                stroke.len() < 2
+                    || stroke.iter().any(|point| {
+                        !point.x.is_finite()
+                            || !point.y.is_finite()
+                            || !(0.0..=1000.1).contains(&point.x)
+                            || !(0.0..=320.0).contains(&point.y)
+                    })
+            })
+        {
+            return Err(Error::Invalid("handwriting strokes".into()));
+        }
+        Ok(count)
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Cell {
     pub id: u64,
     pub name: String,
@@ -96,6 +131,8 @@ pub struct Cell {
     #[serde(default)]
     pub resolved_root: Option<Id>,
     pub note: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ink: Option<CellInk>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -199,6 +236,7 @@ impl Project {
                 calculation_error: None,
                 calculated_revision: None,
                 resolved_root: None,
+                ink: None,
                 note: String::new(),
             },
             Cell {
@@ -215,6 +253,7 @@ impl Project {
                 calculation_error: None,
                 calculated_revision: None,
                 resolved_root: None,
+                ink: None,
                 note: String::new(),
             },
         ];
@@ -262,6 +301,7 @@ impl Project {
         }
         let mut graph = self.graph.clone();
         graph.rebuild()?;
+        let mut ink_points = 0;
         for (name, b) in &self.branches {
             if name != &b.name
                 || name.is_empty()
@@ -275,6 +315,12 @@ impl Project {
             let mut names = BTreeSet::new();
             crate::dependencies::DependencyGraph::build(&graph, b)?;
             for c in &b.cells {
+                if let Some(ink) = &c.ink {
+                    ink_points += ink.validate()?;
+                    if ink_points > 64000 {
+                        return Err(Error::Limit);
+                    }
+                }
                 if c.id >= self.next_cell
                     || !seen.insert(c.id)
                     || !names.insert(c.name.clone())

@@ -30,15 +30,34 @@ pub async fn handwriting_pick_path(
         let selected = if kind == "models" {
             dialog.blocking_pick_folder()
         } else {
-            dialog
-                .add_filter("ONNX Runtime", &["dylib", "dll", "so"])
-                .blocking_pick_file()
+            // macOS can classify the runtime as a Unix executable and disable it
+            // in an extension-filtered panel. Validate the returned path instead.
+            #[cfg(not(target_os = "macos"))]
+            let dialog = dialog.add_filter("ONNX Runtime", &["dylib", "dll", "so"]);
+            dialog.blocking_pick_file()
         };
         check()?;
         selected
             .map(|file| {
-                file.into_path()
-                    .map(|path| path.to_string_lossy().into_owned())
+                let path = file.into_path().map_err(|_| error("io_error"))?;
+                let valid = if kind == "models" {
+                    path.is_dir()
+                } else {
+                    path.is_file()
+                        && path
+                            .extension()
+                            .and_then(|ext| ext.to_str())
+                            .is_some_and(|ext| {
+                                ["dylib", "dll", "so"]
+                                    .iter()
+                                    .any(|allowed| ext.eq_ignore_ascii_case(allowed))
+                            })
+                };
+                if !valid {
+                    return Err(error("invalid_project"));
+                }
+                path.into_os_string()
+                    .into_string()
                     .map_err(|_| error("io_error"))
             })
             .transpose()
@@ -254,4 +273,28 @@ pub fn handwriting_settings(webview: tauri::Webview) -> Result<serde_json::Value
     }
     serde_json::from_slice(&std::fs::read(path).map_err(|_| error("io_error"))?)
         .map_err(|_| error("invalid_project"))
+}
+
+#[tauri::command]
+pub fn handwriting_cell_ink(
+    webview: tauri::Webview,
+    id: u64,
+    generation: u64,
+    revision: u64,
+) -> Result<symbio_core::model::CellInk, UiError> {
+    authorize(&webview)?;
+    let shared = webview.state::<Shared>();
+    let session = shared.0.lock().map_err(|_| error("internal_error"))?;
+    session.check_generation(generation)?;
+    let project = session.core.project();
+    if project.revision != revision {
+        return Err(error("revision_conflict"));
+    }
+    project
+        .current()
+        .cells
+        .iter()
+        .find(|cell| cell.id == id)
+        .and_then(|cell| cell.ink.clone())
+        .ok_or_else(|| error("invalid_project"))
 }

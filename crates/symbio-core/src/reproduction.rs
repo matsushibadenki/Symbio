@@ -427,6 +427,7 @@ fn fresh(p: &Payload) -> Result<Project> {
             calculation_error: Some("not_replayed".into()),
             calculated_revision: None,
             resolved_root: None,
+            ink: None,
             note: c.note.clone(),
         });
         project.next_cell = project

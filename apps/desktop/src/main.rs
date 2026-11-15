@@ -397,6 +397,7 @@ fn main() {
             handwriting::configure,
             handwriting::handwriting_pick_path,
             handwriting::handwriting_settings,
+            handwriting::handwriting_cell_ink,
             handwriting::recognize,
             handwriting::handwriting_cancel,
             handwriting::ink_update,

@@ -99,6 +99,13 @@ pub enum Command {
         name: String,
         source: String,
     },
+    #[serde(rename = "math.define_handwritten")]
+    DefineHandwritten {
+        id: Option<u64>,
+        name: String,
+        source: String,
+        ink: Option<model::CellInk>,
+    },
     #[serde(rename = "math.assume")]
     Assume {
         symbol: String,
@@ -149,6 +156,7 @@ pub struct Request {
 pub struct CellView {
     #[serde(flatten)]
     pub cell: Cell,
+    pub has_ink: bool,
     pub expression: String,
     pub kind: String,
     pub mathml: String,
@@ -289,7 +297,11 @@ impl AppCore {
                 .cells
                 .iter()
                 .map(|c| CellView {
-                    cell: c.clone(),
+                    cell: Cell {
+                        ink: None,
+                        ..c.clone()
+                    },
+                    has_ink: c.ink.is_some(),
                     kind: structured::kind(&p.graph, c.resolved_root.unwrap_or(c.root)).into(),
                     expression: p.graph.text(c.root),
                     mathml: p.graph.mathml(c.root),
@@ -372,11 +384,19 @@ impl AppCore {
         next.revision = self.project.revision.checked_add(1).ok_or(Error::Limit)?;
         // Audit log records actual operations, including history navigation.
         next.history = self.project.history.clone();
+        let audit_command = match &request.command {
+            Command::DefineHandwritten {
+                id, name, source, ..
+            } => serde_json::json!({
+                "method": "math.define_handwritten", "id": id, "name": name, "source": source
+            }),
+            command => serde_json::to_value(command)?,
+        };
         next.history.push(Event {
             revision: next.revision,
             actor: request.actor,
             branch: next.active.clone(),
-            command: serde_json::to_value(&request.command)?,
+            command: audit_command,
             engine: ENGINE.into(),
         });
         if next.history.len() > 256 {
@@ -521,11 +541,38 @@ fn execute(p: &mut Project, command: &Command) -> Result<()> {
                     calculation_error: None,
                     calculated_revision: None,
                     resolved_root: None,
+                    ink: None,
                     note: String::new(),
                 });
                 p.current_mut().selected = Some(id);
             }
             dependencies::recalculate(p, std::collections::BTreeSet::from([changed_id]))?;
+        }
+        Command::DefineHandwritten {
+            id,
+            name,
+            source,
+            ink,
+        } => {
+            if let Some(ink) = ink {
+                ink.validate()?;
+            }
+            let cell_id = id.unwrap_or(p.next_cell);
+            execute(
+                p,
+                &Command::DefineLatex {
+                    id: *id,
+                    name: name.clone(),
+                    source: source.clone(),
+                },
+            )?;
+            let cell = p
+                .current_mut()
+                .cells
+                .iter_mut()
+                .find(|cell| cell.id == cell_id)
+                .ok_or_else(|| Error::Invalid("cell".into()))?;
+            cell.ink = ink.clone();
         }
         Command::Assume { symbol, assumption } => {
             if !graph::valid_symbol(symbol) {

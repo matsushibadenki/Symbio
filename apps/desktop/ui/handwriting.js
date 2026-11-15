@@ -1,7 +1,7 @@
 let inkRevision=Date.now();
 // Reusable editor shell: host supplies recognition, validation and commit adapters.
 // Only input gestures and editable LaTeX live here; tensors/model execution stay native.
-export async function openHandwriting({translate:t, configure, readSettings, pickPath, updateInk, recognize, cancelRecognition, preview, commit, pending, generationValid}) {
+export async function openHandwriting({translate:t, configure, readSettings, pickPath, updateInk, recognize, cancelRecognition, preview, commit, pending, generationValid, initialInk, initialSource}) {
  await import('./vendor/mathlive/mathlive.min.mjs');
  const Mathfield=customElements.get('math-field');
  Mathfield.fontsDirectory=new URL('./vendor/mathlive/fonts',import.meta.url).href;
@@ -31,9 +31,9 @@ export async function openHandwriting({translate:t, configure, readSettings, pic
  const editor=make('math-field',{'virtual-keyboard-mode':'manual','aria-label':t('handwriting_candidate')});
  const source=make('textarea',{'aria-label':t('latex'),rows:'2',spellcheck:'false'});
  const math=make('div',{class:'ink-preview'});
- const add=make('button',{type:'button',class:'primary',disabled:''},t('handwriting_insert'));
+ const add=make('button',{type:'button',class:'primary',disabled:''},t(initialInk?'handwriting_update':'handwriting_insert'));
  dialog.append(head,settings,svg,tools,choices,editor,source,math,status,add);document.body.append(dialog);
- let strokes=[],active=null,revision=++inkRevision,epoch=0,valid=false,queue=Promise.resolve(),working=false,closed=false,recognizing=false,cancelRequested=false;
+ let strokes=structuredClone(initialInk?.strokes??[]),active=null,revision=++inkRevision,epoch=0,valid=false,queue=Promise.resolve(),working=false,closed=false,recognizing=false,cancelRequested=false;
  const report=e=>{if(closed)return;if((cancelRequested&&recognizing)||e?.code==='handwriting_cancelled'){status.textContent=t('handwriting_cancelled');return;}status.textContent=e?.detail||e?.message||String(e)};
  const invalidate=()=>{choices.replaceChildren();++epoch;valid=false;add.disabled=true;if(source.value)status.textContent=t('handwriting_stale')};
  const dirty=()=>pending(strokes.length>0||source.value.length>0);
@@ -42,10 +42,35 @@ export async function openHandwriting({translate:t, configure, readSettings, pic
  const validate=async value=>{const token=++epoch;valid=false;add.disabled=true;math.replaceChildren();source.value=value;dirty();if(!value.trim())return;try{const result=await preview(value);if(closed||token!==epoch)return;math.innerHTML=result.mathml;valid=true;add.disabled=working||active!==null;status.textContent='';}catch(e){if(token===epoch)report(e)}};
  editor.addEventListener('input',()=>validate(editor.value));source.addEventListener('input',()=>{editor.value=source.value;validate(source.value)});
  const point=e=>{const r=svg.getBoundingClientRect();return {x:Math.max(0,Math.min(1000,(e.clientX-r.left)*1000/r.width)),y:Math.max(0,Math.min(320,(e.clientY-r.top)*320/r.height))}};
- svg.addEventListener('pointerdown',e=>{if(working||active||!e.isPrimary||e.button!==0||strokes.length>=256)return;e.preventDefault();svg.setPointerCapture(e.pointerId);active=[point(e)];strokes.push(active);redraw();dirty();invalidate();});
- svg.addEventListener('pointermove',e=>{if(!active||!e.isPrimary)return;if(strokes.reduce((n,s)=>n+s.length,0)>=16000)return;active.push(point(e));redraw()});
- const end=()=>{if(!active)return;if(active.length===1)active.push({...active[0],x:active[0].x+0.1});active=null;sync().catch(report)};
- svg.addEventListener('pointerup',end);svg.addEventListener('pointercancel',end);
+ let activePointer=null;
+ const end=e=>{
+  if(!active||(e&&e.pointerId!==activePointer))return;
+  if(active.length===1)active.push({...active[0],x:active[0].x+0.1});
+  active=null;
+  activePointer=null;
+  sync().catch(report);
+ };
+ svg.addEventListener('pointerdown',e=>{
+  if(working||!e.isPrimary||e.button!==0)return;
+  // A new primary press starts a separate stroke even if the previous release was lost.
+  end();
+  if(strokes.length>=256)return;
+  e.preventDefault();
+  svg.setPointerCapture(e.pointerId);
+  activePointer=e.pointerId;
+  active=[point(e)];
+  strokes.push(active);
+  redraw();
+  dirty();
+  invalidate();
+ });
+ svg.addEventListener('pointermove',e=>{
+  if(!active||e.pointerId!==activePointer)return;
+  if(strokes.reduce((n,s)=>n+s.length,0)>=16000)return;
+  active.push(point(e));
+  redraw();
+ });
+ for(const event of ['pointerup','pointercancel','lostpointercapture'])svg.addEventListener(event,end);
  undo.onclick=()=>{if(working)return;strokes.pop();invalidate();redraw();sync().catch(report);dirty()};
  clear.onclick=()=>{if(working)return;strokes=[];active=null;choices.replaceChildren();++epoch;redraw();editor.value='';source.value='';math.replaceChildren();valid=false;add.disabled=true;sync().catch(report);dirty()};
  const run=async fn=>{if(working)return;working=true;add.disabled=true;load.disabled=infer.disabled=undo.disabled=clear.disabled=browseModels.disabled=browseRuntime.disabled=true;status.textContent=t('working');try{await fn()}catch(e){report(e)}finally{working=false;load.disabled=infer.disabled=undo.disabled=clear.disabled=browseModels.disabled=browseRuntime.disabled=false;add.disabled=!valid||active!==null}};
@@ -63,9 +88,16 @@ export async function openHandwriting({translate:t, configure, readSettings, pic
   button.setAttribute('aria-pressed',String(i===0));choices.append(button);
  }
  await choose(candidates[0]);}finally{recognizing=false;stop.disabled=true;if(cancelRequested&&!closed)status.textContent=t('handwriting_cancelled')}});
- add.onclick=()=>run(async()=>{if(!valid||active!==null||!generationValid())return;await commit(editor.value);strokes=[];source.value='';pending(false);dialog.close()});
+ add.onclick=()=>run(async()=>{if(!valid||active!==null)return;if(!generationValid())throw {code:'revision_conflict',message:t('revision_conflict')};await commit(source.value,{strokes:structuredClone(strokes)});strokes=[];source.value='';pending(false);dialog.close()});
  close.onclick=()=>dialog.close();dialog.addEventListener('cancel',e=>{if(recognizing){e.preventDefault();requestCancel();return;}if(working)e.preventDefault()});
  dialog.addEventListener('close',()=>{requestCancel();closed=true;++epoch;pending(false);updateInk({strokes:[]},revision=++inkRevision).catch(()=>{});dialog.remove()});
  dialog.showModal();
+ if(initialInk){
+  redraw();
+  sync().catch(report);
+  editor.value=initialSource??'';
+  validate(initialSource??'');
+ }
+
  if(readSettings)try{const saved=await readSettings();if(!closed){models.value=saved.models||'';runtime.value=saved.runtime||'';}}catch(e){report(e)}
 }
