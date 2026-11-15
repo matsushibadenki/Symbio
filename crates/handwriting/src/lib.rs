@@ -231,6 +231,7 @@ impl Recognizer {
                 });
             }
         }
+        prefer_digit_in_flat_arithmetic(&mut candidates);
         let first = candidates.first().ok_or("empty recognition")?;
         Ok(Recognition {
             latex: first.latex.clone(),
@@ -241,6 +242,32 @@ impl Recognizer {
         })
     }
 }
+// A lone bar in a flat sum or difference can be a misread digit. Only
+// promote a complete alternative the model actually produced.
+fn prefer_digit_in_flat_arithmetic(candidates: &mut [Candidate]) {
+    let Some(first) = candidates.first().filter(|candidate| candidate.complete) else {
+        return;
+    };
+    let top: Vec<_> = first.latex.split_whitespace().collect();
+    if top.iter().filter(|&&token| token == "|").count() != 1
+        || !top.iter().any(|&token| matches!(token, "+" | "-"))
+        || !top.iter().all(|&token| {
+            matches!(token, "+" | "-" | "|")
+                || (token.len() == 1 && token.as_bytes()[0].is_ascii_alphanumeric())
+        })
+    {
+        return;
+    }
+    let expected = top
+        .iter()
+        .map(|&token| if token == "|" { "1" } else { token });
+    if let Some(index) = candidates.iter().position(|candidate| {
+        candidate.complete && candidate.latex.split_whitespace().eq(expected.clone())
+    }) {
+        candidates[..=index].rotate_right(1);
+    }
+}
+
 #[derive(Clone, Debug)]
 struct Beam {
     ids: Vec<i64>,
@@ -308,6 +335,28 @@ fn search(width: usize, mut logits: impl FnMut(&[i64]) -> Result<Vec<f32>>) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn promotes_only_a_matching_digit_alternative_and_preserves_paired_bars() {
+        let make = |latex: &str| Candidate {
+            latex: latex.into(),
+            complete: true,
+            tokens: latex.split_whitespace().count(),
+            log_score: -1.,
+        };
+        let mut arithmetic = [make("| - 1"), make("1 - 1"), make("| - |")];
+        prefer_digit_in_flat_arithmetic(&mut arithmetic);
+        assert_eq!(
+            arithmetic.map(|candidate| candidate.latex),
+            ["1 - 1", "| - 1", "| - |"]
+        );
+        let mut absolute_value = [make("| x | + 1"), make("1 x 1 + 1")];
+        prefer_digit_in_flat_arithmetic(&mut absolute_value);
+        assert_eq!(absolute_value[0].latex, "| x | + 1");
+        let mut unrelated = [make("| + x"), make("1 - x")];
+        prefer_digit_in_flat_arithmetic(&mut unrelated);
+        assert_eq!(unrelated[0].latex, "| + x");
+    }
+
     #[test]
     fn cloned_token_cancels_across_threads_and_stops_search() {
         let token = CancellationToken::default();

@@ -151,3 +151,21 @@ On macOS, used the same pointer drag paths and order in isolated Tauri builds be
 | `x+1` | 5 / 5 | 1 / 1 |
 
 The first candidate matched in 2/3 formulas and the top three contained the reference in 3/3 formulas in each build. The first candidate for `1-1` was `| - 1` in both. The historical connector did not recur in the paired baseline draws. The missing-release regression test exercises that condition explicitly. An intermediate native run caught a separate issue where the automation delivered a move with a zero button bitmask and the editor turned the gesture into a dot. The final build uses capture and pointer identity for stroke boundaries and accepts those moves. These three fixed pointer paths are a native workflow check with limited coverage of natural handwriting.
+
+### Digit 1 and vertical bar
+
+Collected four additional labeled inputs in an isolated macOS Tauri notebook: `11`, `|x|`, `|1|` and `1`. Combined them with the three existing labeled notebook inputs above. The saved logical stroke coordinates and labels are in [notebook-bars.jsonl](../examples/handwriting/notebook-bars.jsonl). The same seven recordings went through the original and updated Rust recognizers with the same local model and runtime. Matching uses the benchmark's LaTeX token normalization.
+
+After beam search, the recognizer can move an existing complete candidate to first place when the leading complete candidate is a simple sum or difference with exactly one bare bar and the alternative replaces only that bar with `1`. The original candidates and model log scores are retained. Paired bars and explicit LaTeX commands are outside the rule.
+
+| Reference | Correct rank before | Correct rank after |
+| --- | ---: | ---: |
+| `1+1` | 1 | 1 |
+| `1-1` | 2 | 1 |
+| `x+1` | 1 | 1 |
+| `11` | Outside top three | Outside top three |
+| `|x|` | 2 | 2 |
+| `|1|` | 1 | 1 |
+| `1` | 1 | 1 |
+
+Top-1 rose from 4/7 to 5/7. Top-3 stayed at 6/7. The seven cases use fixed pointer paths and include the example that motivated the rule. This targeted comparison measures its effect on these saved inputs. Independent natural handwriting and broader vertical-bar notation still need evaluation.
