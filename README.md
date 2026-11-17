@@ -36,13 +36,17 @@ Symbio is an early reproducible derivation and research notebook built with Taur
 
 **The current release is a Semantic Expression Graph (SEG) MVP. Mathematica compatibility, advanced CAS algorithms, LLM integration and formal proof engines are not implemented.**
 
-![Symbio desktop](docs/screenshots/workspace-ja.png)
+## Screenshots
+
+**Notebook workspace** — Typeset definitions and exact results alongside assumptions and the cell dependency graph.
+
+![Symbio notebook with typeset formulas and the cell dependency graph](docs/screenshots/workspace-ja.png)
 
 **3D visualization** — A Rust/wgpu-rendered surface with labeled axes, tick marks and independent x/y ranges.
 
 ![Symbio 3D surface workspace](docs/screenshots/surface-3d-ja.jpg)
 
-**Handwritten formula input** — Native handwriting recognition, an editable MathLive formula and a Rust-backed preview before explicit insertion and calculation.
+**Handwritten formula input** — Ranked handwriting recognition candidates, an editable MathLive formula and a Rust-backed preview before explicit insertion and calculation.
 
 ![Symbio handwriting input and formula preview](docs/screenshots/handwriting-ja.jpg)
 
