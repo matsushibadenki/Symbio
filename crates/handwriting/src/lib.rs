@@ -49,6 +49,53 @@ pub struct Ink {
     pub strokes: Vec<Vec<Point>>,
 }
 impl Ink {
+    // Vote only when a single straight stroke is isolated between nearby symbols.
+    // A diagonal stroke in the same position makes the evidence ambiguous.
+    fn has_vertical_separator(&self) -> bool {
+        let mut separator = None;
+        for (index, stroke) in self.strokes.iter().enumerate() {
+            let Some((start, end)) = stroke.first().zip(stroke.last()) else {
+                continue;
+            };
+            let height = (end.y - start.y).abs();
+            let width = (end.x - start.x).abs();
+            if height <= 0. || width > height * 0.8 {
+                continue;
+            }
+            if stroke.iter().any(|point| {
+                let t = (point.y - start.y) / (end.y - start.y);
+                !(-0.08..=1.08).contains(&t)
+                    || (point.x - (start.x + t * (end.x - start.x))).abs() > height * 0.08
+            }) {
+                continue;
+            }
+            let y = (start.y + end.y) * 0.5;
+            let mut left = false;
+            let mut right = false;
+            let mut touches = false;
+            for point in self
+                .strokes
+                .iter()
+                .enumerate()
+                .filter(|(other, _)| *other != index)
+                .flat_map(|(_, points)| points)
+            {
+                if (point.y - y).abs() > height * 0.45 {
+                    continue;
+                }
+                let t = (point.y - start.y) / (end.y - start.y);
+                let dx = (point.x - (start.x + t * (end.x - start.x))) / height;
+                touches |= dx.abs() < 0.10;
+                left |= (-0.85..=-0.10).contains(&dx);
+                right |= (0.10..=0.85).contains(&dx);
+            }
+            if left && right && !touches && separator.replace(width <= height * 0.14).is_some() {
+                return false;
+            }
+        }
+        separator == Some(true)
+    }
+
     pub fn raster(&self) -> Result<GrayImage> {
         let points: Vec<_> = self.strokes.iter().flatten().collect();
         if self.strokes.len() > 256
@@ -98,7 +145,7 @@ impl Ink {
         Ok(image)
     }
 }
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Candidate {
     pub latex: String,
     pub complete: bool,
@@ -113,6 +160,54 @@ pub struct Recognition {
     pub tokens: usize,
     pub elapsed_ms: u128,
     pub candidates: Vec<Candidate>,
+}
+impl Recognition {
+    /// Apply the notebook's context-specific recognition corrections.
+    pub fn rank_for_notebook(&mut self) {
+        self.rank_for_notebook_with_conditional_bar(true);
+    }
+
+    /// Allow paired evaluation of the probability rule with identical decoder output.
+    pub fn rank_for_notebook_with_conditional_bar(&mut self, enabled: bool) {
+        self.rank_for_notebook_with_ink(None, enabled);
+    }
+
+    /// Apply the notebook ranking using the same strokes passed to the decoder.
+    pub fn rank_for_notebook_with_ink(&mut self, ink: Option<&Ink>, enabled: bool) {
+        prefer_digit_in_flat_arithmetic(&mut self.candidates);
+        for candidate in &mut self.candidates {
+            if candidate.complete {
+                restore_divisor_product(&mut candidate.latex);
+            }
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        self.candidates
+            .retain(|candidate| seen.insert(candidate.latex.clone()));
+        if enabled {
+            if self.candidates.iter().any(|candidate| {
+                candidate.complete && conditional_bar_alternative(&candidate.latex).is_some()
+            }) && ink.is_some_and(Ink::has_vertical_separator)
+            {
+                for candidate in &mut self.candidates {
+                    if candidate.complete
+                        && let Some(latex) = conditional_bar_alternative(&candidate.latex)
+                    {
+                        candidate.latex = latex;
+                    }
+                }
+                seen.clear();
+                self.candidates
+                    .retain(|candidate| seen.insert(candidate.latex.clone()));
+            } else {
+                offer_conditional_bar(&mut self.candidates);
+            }
+        }
+        if let Some(first) = self.candidates.first() {
+            self.latex.clone_from(&first.latex);
+            self.complete = first.complete;
+            self.tokens = first.tokens;
+        }
+    }
 }
 pub struct Recognizer {
     encoder: Session,
@@ -164,7 +259,13 @@ impl Recognizer {
         cancel: &CancellationToken,
     ) -> Result<Recognition> {
         cancel.check()?;
-        self.decode_image(ink.raster()?, 3, cancel)
+        let mut result = self.decode_image(ink.raster()?, 3, cancel)?;
+        result.rank_for_notebook_with_ink(Some(ink), true);
+        Ok(result)
+    }
+    /// Compare the decoder order with downstream notebook ranking.
+    pub fn recognize_candidates_raw(&mut self, ink: &Ink) -> Result<Recognition> {
+        self.decode_image(ink.raster()?, 3, &CancellationToken::default())
     }
     pub fn recognize_image(&mut self, image: GrayImage) -> Result<Recognition> {
         self.decode_image(image, 1, &CancellationToken::default())
@@ -231,7 +332,6 @@ impl Recognizer {
                 });
             }
         }
-        prefer_digit_in_flat_arithmetic(&mut candidates);
         let first = candidates.first().ok_or("empty recognition")?;
         Ok(Recognition {
             latex: first.latex.clone(),
@@ -242,6 +342,147 @@ impl Recognizer {
         })
     }
 }
+// Preserve the decoder's candidates and their order. A contextual guess
+// is only useful when it can fill a spare slot without displacing input.
+fn offer_conditional_bar(candidates: &mut Vec<Candidate>) {
+    let original_count = candidates.len();
+    for index in 0..original_count {
+        if candidates.len() >= 3 {
+            break;
+        }
+        let candidate = &candidates[index];
+        if !candidate.complete {
+            continue;
+        }
+        if let Some(latex) = conditional_bar_alternative(&candidate.latex)
+            && !candidates.iter().any(|existing| existing.latex == latex)
+        {
+            candidates.push(Candidate {
+                latex,
+                ..candidate.clone()
+            });
+        }
+    }
+}
+
+fn conditional_bar_alternative(latex: &str) -> Option<String> {
+    let mut tokens: Vec<_> = latex.split_whitespace().collect();
+    let mut replacement = None;
+    for (start, token) in tokens.iter().enumerate() {
+        if *token != "P" {
+            continue;
+        }
+        let open = start + 1 + usize::from(tokens.get(start + 1) == Some(&"r"));
+        if tokens.get(open) != Some(&"(") {
+            continue;
+        }
+        let mut nesting = vec!["("];
+        let mut slash = None;
+        let mut ambiguous = false;
+        for (index, &item) in tokens.iter().enumerate().skip(open + 1) {
+            match item {
+                "(" | "[" | "{" => nesting.push(item),
+                ")" | "]" | "}" => {
+                    let expected = match item {
+                        ")" => "(",
+                        "]" => "[",
+                        _ => "{",
+                    };
+                    if nesting.pop() != Some(expected) {
+                        break;
+                    }
+                    if nesting.is_empty() {
+                        if !ambiguous && let Some(sep) = slash {
+                            let symbolic = |side: &[&str]| {
+                                side.iter().any(|token| {
+                                    (token.len() == 1 && token.as_bytes()[0].is_ascii_alphabetic())
+                                        || matches!(
+                                            *token,
+                                            r"\alpha"
+                                                | r"\beta"
+                                                | r"\lambda"
+                                                | r"\theta"
+                                                | r"\sigma"
+                                        )
+                                })
+                            };
+                            if symbolic(&tokens[open + 1..sep]) && symbolic(&tokens[sep + 1..index])
+                            {
+                                // Multiple ambiguous probability calls are left to the editor.
+                                if replacement.replace(sep).is_some() {
+                                    return None;
+                                }
+                            }
+                        }
+                        break;
+                    }
+                }
+                "/" if nesting.len() == 1 => {
+                    ambiguous |= slash.replace(index).is_some();
+                }
+                "|" | r"\mid" | r"\vert" if nesting.len() == 1 => ambiguous = true,
+                _ => {}
+            }
+        }
+    }
+    tokens[replacement?] = "|";
+    Some(tokens.join(" "))
+}
+
+// The checkpoint has pi tokens but no product operator. When a divisor
+// index and its factor agree, recover the operator and the index separator.
+fn restore_divisor_product(latex: &mut String) {
+    let mut tokens: Vec<_> = latex.split_whitespace().collect();
+    let mut index = 0;
+    let mut changed = false;
+    while index < tokens.len() {
+        if !matches!(tokens[index], r"\pi" | r"\Pi") {
+            index += 1;
+            continue;
+        }
+        let limit = usize::from(tokens.get(index + 1) == Some(&r"\limits"));
+        let start = index + 1 + limit;
+        let Some((script, factor)) = tokens
+            .get(start..)
+            .and_then(|tail| tail.split_at_checked(6))
+        else {
+            break;
+        };
+        let ["_", "{", divisor @ ("d" | "p"), separator, "n", "}"] = script else {
+            index += 1;
+            continue;
+        };
+        let divisor = *divisor;
+        let bound_factor = match factor {
+            [symbol, ..] if *symbol == divisor => true,
+            [function, "(", argument, ")", ..] => {
+                function.len() == 1
+                    && function.as_bytes()[0].is_ascii_alphabetic()
+                    && *argument == divisor
+            }
+            ["(", tail @ ..] => tail.contains(&divisor) && tail.contains(&")"),
+            _ => false,
+        };
+        if bound_factor
+            && matches!(
+                *separator,
+                "|" | "i" | "l" | "1" | "(" | "!" | "," | r"\rightarrow"
+            )
+        {
+            tokens[index] = r"\prod";
+            tokens[start + 3] = "|";
+            if limit != 0 {
+                tokens.remove(index + 1);
+            }
+            changed = true;
+        }
+        index += 1;
+    }
+    if changed {
+        *latex = tokens.join(" ");
+    }
+}
+
 // A lone bar in a flat sum or difference can be a misread digit. Only
 // promote a complete alternative the model actually produced.
 fn prefer_digit_in_flat_arithmetic(candidates: &mut [Candidate]) {
@@ -335,6 +576,90 @@ fn search(width: usize, mut logits: impl FnMut(&[i64]) -> Result<Vec<f32>>) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn conditional_bar_requires_a_single_symbolic_separator_in_a_probability_call() {
+        assert_eq!(
+            conditional_bar_alternative("P r ( A / B _ { n } ) = 1 / 2").as_deref(),
+            Some("P r ( A | B _ { n } ) = 1 / 2")
+        );
+        for untouched in [
+            "P ( X = 2 / 3 )",
+            "P ( X | Y / Z )",
+            "P ( A / B / C )",
+            "P ( A / B ) P ( C / D )",
+            "P ( A / B ]",
+            "f ( A / B )",
+            r"P ( A | X = \frac { a } { b } )",
+        ] {
+            assert!(
+                conditional_bar_alternative(untouched).is_none(),
+                "{untouched}"
+            );
+        }
+    }
+
+    #[test]
+    fn separator_geometry_distinguishes_a_bar_from_a_slash() {
+        let point = |x, y| Point { x, y };
+        let mut ink = Ink {
+            strokes: vec![
+                vec![point(2., 4.), point(2., 6.)],
+                vec![point(5., 0.), point(5., 10.)],
+                vec![point(8., 4.), point(8., 6.)],
+            ],
+        };
+        assert!(ink.has_vertical_separator());
+        ink.strokes[1][1].x = 9.;
+        assert!(!ink.has_vertical_separator());
+        ink.strokes[1][1].x = 5.;
+        ink.strokes[2].push(point(5., 5.));
+        assert!(!ink.has_vertical_separator());
+    }
+
+    #[test]
+    fn conditional_bar_only_fills_spare_candidate_slots() {
+        let make = |latex: &str| Candidate {
+            latex: latex.into(),
+            complete: true,
+            tokens: latex.split_whitespace().count(),
+            log_score: -1.,
+        };
+        let mut candidates = vec![
+            make("P ( A / B )"),
+            make("P ( A | B )"),
+            make("P ( A / C )"),
+        ];
+        offer_conditional_bar(&mut candidates);
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|candidate| candidate.latex.as_str())
+                .collect::<Vec<_>>(),
+            ["P ( A / B )", "P ( A | B )", "P ( A / C )"],
+        );
+        candidates.truncate(1);
+        offer_conditional_bar(&mut candidates);
+        assert_eq!(candidates[0].latex, "P ( A / B )");
+        assert_eq!(candidates[1].latex, "P ( A | B )");
+    }
+
+    #[test]
+    fn restores_divisor_product_only_with_a_matching_factor() {
+        let mut product = r"\pi \limits _ { p i n } f ( p )".to_owned();
+        restore_divisor_product(&mut product);
+        assert_eq!(product, r"\prod _ { p | n } f ( p )");
+        for untouched in [
+            r"\pi _ { p i n } f ( q )",
+            r"\pi _ { p / n } f ( p )",
+            r"P ( A | B )",
+            r"\pi _ { p | n }",
+        ] {
+            let mut latex = untouched.to_owned();
+            restore_divisor_product(&mut latex);
+            assert_eq!(latex, untouched);
+        }
+    }
+
     #[test]
     fn promotes_only_a_matching_digit_alternative_and_preserves_paired_bars() {
         let make = |latex: &str| Candidate {
