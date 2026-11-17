@@ -157,12 +157,14 @@ pub async fn show_plot(
                 let window = if let Some(w) = handle.get_window("plot") {
                     w
                 } else {
-                    tauri::WindowBuilder::new(&handle, "plot")
-                        .title(&title)
-                        .inner_size(900., 600.)
-                        .min_inner_size(400., 300.)
-                        .build()
-                        .map_err(|_| super::error("panel_error"))?
+                    super::workspace::build_host(
+                        &handle,
+                        "plot",
+                        &title,
+                        [900., 600.],
+                        [400., 300.],
+                    )
+                    .map_err(|_| super::error("panel_error"))?
                 };
                 window
                     .set_title(&title)

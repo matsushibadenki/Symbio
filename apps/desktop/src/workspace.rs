@@ -1,4 +1,4 @@
-//! Persistent native child WebViews follow a Rust-owned dock tree (UNGE composition).
+//! Standalone WebviewWindows host the Rust-owned dock tree and its persistent panel views.
 use super::{
     UiError, error,
     layout::{Axis, Command, Destination, LayoutState, Panel},
@@ -308,21 +308,46 @@ pub fn resize(app: &tauri::AppHandle) {
         }
     });
 }
+/// Create an independent window with a local shell. Hide just the shell WebView
+/// so docked panels and native wgpu surfaces can occupy the content area.
+pub(crate) fn build_host(
+    app: &tauri::AppHandle,
+    label: &str,
+    title: &str,
+    size: [f64; 2],
+    minimum: [f64; 2],
+) -> tauri::Result<tauri::Window> {
+    let host = tauri::WebviewWindowBuilder::new(
+        app,
+        label,
+        tauri::WebviewUrl::App("window-shell.html".into()),
+    )
+    .title(title)
+    .inner_size(size[0], size[1])
+    .min_inner_size(minimum[0], minimum[1])
+    .visible(false)
+    .focused(false);
+    let host = if label == "main" || label == "plot" {
+        host
+    } else {
+        host.center()
+    }
+    .build()?;
+    let shell = host.as_ref();
+    if let Err(err) = shell.hide() {
+        let _ = host.destroy();
+        return Err(err);
+    }
+    Ok(shell.window())
+}
+
 pub fn initialize(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    let home = tauri::WindowBuilder::new(app, "main")
-        .title("Symbio")
-        .inner_size(1280., 800.)
-        .min_inner_size(800., 480.)
-        .visible(false)
-        .build()?;
-    let mut floating = Vec::new();
+    let home = build_host(app, "main", "Symbio", [1280., 800.], [800., 480.])?;
     for host in Panel::ALL {
         let window = floating_window(app, host).map_err(|e| std::io::Error::other(e.code))?;
         app.state::<Workspace>().update_inset(&window);
-        floating.push(window);
     }
-    // Prepare every possible host surface before child WebViews; reuse one renderer.
-    let _ = floating;
+    // Prepare the GPU layers before adding the docked panel WebViews.
     super::surface3d::initialize(app)?;
     app.state::<Workspace>().update_inset(&home);
     let state = app.state::<Workspace>().snapshot();
@@ -396,14 +421,9 @@ fn floating_window(app: &tauri::AppHandle, panel: Panel) -> Result<tauri::Window
         return Ok(window);
     }
     let title = panel_title(panel, &app.state::<Workspace>().snapshot().locale);
-    let window = tauri::WindowBuilder::new(app, panel.window())
-        .title(title)
-        .inner_size(if panel == Panel::Notebook { 800. } else { 380. }, 560.)
-        .min_inner_size(240., 240.)
-        .visible(false)
-        .center()
-        .build()
-        .map_err(native)?;
+    let width = if panel == Panel::Notebook { 800. } else { 380. };
+    let window =
+        build_host(app, panel.window(), title, [width, 560.], [240., 240.]).map_err(native)?;
     app.state::<super::window_placement::Store>()
         .restore(&window, [240., 240.])
         .map_err(native)?;
