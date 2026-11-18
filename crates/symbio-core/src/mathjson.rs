@@ -92,6 +92,18 @@ fn variable(v: &Value) -> Result<String> {
     }
     Ok(s.into())
 }
+fn decode_number(g: &mut Graph, decimal: &str, precision: Option<u32>) -> Result<Id> {
+    if precision.is_some() || decimal.contains(['.', 'e', 'E']) {
+        graph::validate_approximate(decimal, precision)?;
+        g.intern(Node::Approximate {
+            decimal: decimal.into(),
+            precision,
+        })
+    } else {
+        integer(decimal)?;
+        g.rat(graph::rational(decimal)?)
+    }
+}
 pub fn decode(g: &mut Graph, v: &Value) -> Result<Id> {
     fn go(g: &mut Graph, v: &Value, depth: usize, budget: &mut usize) -> Result<Id> {
         if depth > 48 || *budget == 0 {
@@ -99,15 +111,11 @@ pub fn decode(g: &mut Graph, v: &Value) -> Result<Id> {
         }
         *budget -= 1;
         if let Some(n) = v.as_number() {
-            if !(n.is_i64() || n.is_u64()) {
-                return Err(unsupported());
-            }
-            return g.rat(graph::rational(&n.to_string())?);
+            return decode_number(g, &n.to_string(), None);
         }
         if let Some(s) = v.as_str() {
             if s.starts_with('-') || s.as_bytes().first().is_some_and(u8::is_ascii_digit) {
-                integer(s)?;
-                return g.rat(graph::rational(s)?);
+                return decode_number(g, s, None);
             }
             return match s {
                 "Pi" => g.intern(Node::Constant("pi".into())),
@@ -117,13 +125,26 @@ pub fn decode(g: &mut Graph, v: &Value) -> Result<Id> {
             };
         }
         if let Some(o) = v.as_object() {
+            if let Some(n) = o.get("num") {
+                if o.keys()
+                    .any(|key| !matches!(key.as_str(), "num" | "precision"))
+                {
+                    return Err(unsupported());
+                }
+                let s = n.as_str().ok_or_else(unsupported)?;
+                let precision = o
+                    .get("precision")
+                    .map(|value| {
+                        value
+                            .as_u64()
+                            .and_then(|digits| u32::try_from(digits).ok())
+                            .ok_or_else(unsupported)
+                    })
+                    .transpose()?;
+                return decode_number(g, s, precision);
+            }
             if o.len() != 1 {
                 return Err(unsupported());
-            }
-            if let Some(n) = o.get("num") {
-                let s = n.as_str().ok_or_else(unsupported)?;
-                integer(s)?;
-                return g.rat(graph::rational(s)?);
             }
             if let Some(s) = o.get("sym") {
                 if !s.as_str().is_some_and(graph::valid_symbol) {
@@ -316,6 +337,10 @@ pub fn encode(g: &Graph, root: Id) -> Result<Value> {
         }
         *budget -= 1;
         Ok(match &g.nodes[id] {
+            Node::Approximate { decimal, precision } => match precision {
+                Some(digits) => json!({"num": decimal, "precision": digits}),
+                None => json!({"num": decimal}),
+            },
             Node::Number(s) => {
                 let (n, d) = s.split_once('/').unwrap_or((s, "1"));
                 if d == "1" {

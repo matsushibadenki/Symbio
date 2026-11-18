@@ -315,7 +315,7 @@ impl AppCore {
                     }),
                     result_mathml: c.output.as_ref().and_then(|o| {
                         o.root.map(|r| {
-                            if o.trust == Trust::Approximate {
+                            if o.trust == Trust::Approximate && !p.graph.contains_approximate(r) {
                                 p.graph.approximate_mathml(r)
                             } else {
                                 p.graph.mathml(r)
@@ -626,6 +626,12 @@ fn execute(p: &mut Project, command: &Command) -> Result<()> {
                     )
                 })
                 .collect();
+            let approximate = p.graph.contains_approximate(root);
+            if approximate && !matches!(operation.as_str(), "compute" | "simplify" | "evaluate") {
+                return Err(Error::Unsupported(
+                    "exact operation on approximate input".into(),
+                ));
+            }
             let mut engine = ENGINE.to_string();
             let (result, value, trust, precision) = match operation.as_str() {
                 "factor" => {
@@ -674,6 +680,12 @@ fn execute(p: &mut Project, command: &Command) -> Result<()> {
                         "exact",
                     )
                 }
+                "compute" | "simplify" if approximate => (
+                    Some(root),
+                    None,
+                    Trust::Approximate,
+                    "authored decimal; no error bound",
+                ),
                 "compute" | "simplify" => (
                     Some(algebra::simplify(&mut p.graph, root, &assumptions)?),
                     None,
@@ -792,6 +804,11 @@ fn execute(p: &mut Project, command: &Command) -> Result<()> {
             structured::shape(&p.graph, root)?;
             algebra::dimension(&p.graph, root, &p.current().assumptions, 0)?;
             let assumptions = p.current().assumptions.clone();
+            if p.graph.contains_approximate(root) {
+                return Err(Error::Unsupported(
+                    "exact substitution on approximate input".into(),
+                ));
+            }
             let result = substitution::apply(&mut p.graph, root, values, &assumptions)?;
             let mut conditions: Vec<String> = assumptions
                 .iter()

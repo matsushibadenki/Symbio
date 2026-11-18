@@ -381,7 +381,7 @@ pub fn dimension(
     };
     match &g.nodes[id] {
         Node::Reference(_) => Ok(None),
-        Node::Constant(_) | Node::Number(_) => Ok(Some([0; 3])),
+        Node::Approximate { .. } | Node::Constant(_) | Node::Number(_) => Ok(Some([0; 3])),
         Node::Matrix { .. }
         | Node::Integral { .. }
         | Node::Derivative { .. }

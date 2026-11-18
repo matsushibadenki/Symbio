@@ -17,7 +17,8 @@ CLI export uses the selected cell and requires the source document not to be loc
 
 ## Supported expression forms
 
-- Exact integer JSON numbers within signed/unsigned 64-bit range, integer strings and `{"num":"integer"}`. Larger integers use strings and never pass through float64.
+- Exact integer JSON numbers, integer strings and `{"num":"integer"}`. Integer literals never pass through float64.
+- Decimal and exponent literals in JSON numbers, numeric strings or `{"num":"…"}` are stored as approximate SEG nodes. Spelling and trailing zeros survive notebook storage and MathJSON export. The Symbio extension `{"num":"1.2300","precision":5}` carries a declared significant-digit count (1–4096). An integral spelling with explicit precision also denotes an approximate value. Export uses number objects and preserves omitted precision.
 - `Rational(integer, integer)` with a nonzero denominator.
 - Scalar symbols, `Pi`, `ExponentialE`, `Add`, `Subtract`, `Multiply`, `Divide`, `Power`, `Negate`, binary `Equal`.
 - Unary `Sin`, `Cos`, `Exp`, `Ln`, `Sqrt`, `Abs`, `Floor`, `Ceil`. `Ln` is natural logarithm; `Log` is deliberately not treated as its alias because the [standard distinguishes them](https://mathlive.io/compute-engine/reference/arithmetic/).
@@ -47,9 +48,9 @@ The envelope is Symbio-specific; a standard MathJSON consumer should use its `ex
 
 ## Explicit limits
 
-Fractional/exponential JSON number forms, approximate literals, infinities, complex constants, Unicode identifiers, metadata fields, arbitrary functions/function heads, implicit-variable calculus, functional `Derivative` and solution sets are rejected. The adapter does not stringify unknown objects or evaluate supplied code. `Add`/`Multiply` require 2–128 operands; other mapped functions have fixed arity. Input is limited to 1 MiB, depth 48, an expanded conversion budget of 4096 nodes, 64 assumptions and the existing 2048-byte notebook-source limit. Export also checks source representability, so it does not knowingly create an expression too large for reimport.
+Repeating decimals, infinities, complex constants, Unicode identifiers, metadata fields, arbitrary functions/function heads, implicit-variable calculus, functional `Derivative` and solution sets are rejected. The adapter does not stringify unknown objects or evaluate supplied code. `Add`/`Multiply` require 2–128 operands; other mapped functions have fixed arity. Input is limited to 1 MiB, depth 48, an expanded conversion budget of 4096 nodes, 64 assumptions and the existing 2048-byte notebook-source limit. Export also checks source representability, so it does not knowingly create an expression too large for reimport.
 
-A bounded [OpenMath XML phrasebook](openmath.md) is now available. Wider calculus syntax, approximate-number provenance and full standard-library interoperability remain future work. `python3 scripts/smoke-mathjson.py` verifies CLI roundtrip, exact large numbers, assumptions and file preservation. Rust tests also cover matrix products, equations, reference expansion, unsupported inputs and no-clobber behavior.
+A bounded [OpenMath XML phrasebook](openmath.md) is now available. Wider calculus syntax, full standard-library interoperability remain future work. `python3 scripts/smoke-mathjson.py` verifies CLI roundtrip, exact large numbers, assumptions and file preservation. Rust tests also cover matrix products, equations, reference expansion, unsupported inputs and no-clobber behavior.
 
 ## Calculus examples and evaluation scope
 
@@ -62,3 +63,5 @@ Imports as a definite integral, displays its integral notation and evaluates to 
 The codec preserves authored operators, nested scope, free parameters in bounds and explicit context assumptions. It does not expand the kernel's calculus algorithms. Unsupported symbolic primitives or symbolic/noninteger summation limits remain visible as calculation errors while their valid definitions remain exchangeable. Aggregates use the existing maximum of 256 integer terms; resource-limit violations can reject import before a document is created. Indefinite results retain the existing condition to add an arbitrary constant C. This is symbolic computation, not formal proof.
 
 Omitted variables, partial tuples, more than one limit argument per head, infinite bounds, higher-order count syntax, function literals, `ND` and `NIntegrate` are rejected. Higher derivatives can be represented with nested `D`. Plain `"D"` remains an ordinary physical symbol, distinct from the array-headed operator. No variable is inferred from a name or from LaTeX spelling. The envelope version remains 1: existing exact expressions retain their meanings and the supported subset grows additively.
+
+Approximate literals use the editable notebook notation `\symbioapprox{1.2300:5}` and display with an approximation marker. Symbolic evaluation keeps the authored expression with approximate trust. Use numeric evaluation for float64 computation. The declared digit count describes the input and supplies no error bound or arbitrary-precision computation. Decimal lexemes are limited to 1024 bytes and subject to the notebook source limit.

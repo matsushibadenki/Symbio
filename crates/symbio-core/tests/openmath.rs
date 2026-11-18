@@ -490,3 +490,54 @@ fn latex_reference_matrix_definitions_export_without_mutating_the_notebook() {
     assert_eq!(before, serde_json::to_value(c.snapshot()).unwrap());
     assert_eq!(copy.snapshot().cells[0].kind, "matrix");
 }
+
+#[test]
+fn column_oriented_matrices_preserve_rectangular_orientation() {
+    let body = r#"<OMA><OMS cd="linalg3" name="matrix"/><OMA><OMS cd="linalg3" name="matrixcolumn"/><OMI>1</OMI><OMI>4</OMI></OMA><OMA><OMS cd="linalg3" name="matrixcolumn"/><OMI>2</OMI><OMI>5</OMI></OMA><OMA><OMS cd="linalg3" name="matrixcolumn"/><OMI>3</OMI><OMI>6</OMI></OMA></OMA>"#;
+    let c = load(body);
+    let expected = from_mathjson(serde_json::json!([
+        "List",
+        ["List", 1, 2, 3],
+        ["List", 4, 5, 6]
+    ]));
+    assert_eq!(
+        c.snapshot().cells[0].result_text,
+        expected.snapshot().cells[0].result_text
+    );
+    let xml = String::from_utf8(export(c.project(), 1).unwrap()).unwrap();
+    assert!(xml.contains("matrixrow"));
+    assert_eq!(
+        roundtrip(&c).snapshot().cells[0].result_text,
+        expected.snapshot().cells[0].result_text
+    );
+    let transposed = load(&format!(
+        r#"<OMA><OMS cd="linalg1" name="transpose"/>{body}</OMA>"#
+    ));
+    let expected = from_mathjson(serde_json::json!([
+        "List",
+        ["List", 1, 4],
+        ["List", 2, 5],
+        ["List", 3, 6]
+    ]));
+    assert_eq!(
+        transposed.snapshot().cells[0].result_text,
+        expected.snapshot().cells[0].result_text
+    );
+    let square = r#"<OMA><OMS cd="linalg3" name="matrix"/><OMA><OMS cd="linalg3" name="matrixcolumn"/><OMI>1</OMI><OMI>3</OMI></OMA><OMA><OMS cd="linalg3" name="matrixcolumn"/><OMI>2</OMI><OMI>4</OMI></OMA></OMA>"#;
+    let determinant = load(&format!(
+        r#"<OMA><OMS cd="linalg1" name="determinant"/>{square}</OMA>"#
+    ));
+    assert_eq!(
+        determinant.snapshot().cells[0].result_text.as_deref(),
+        Some("-2")
+    );
+    for bad in [
+        body.replace("matrixcolumn", "matrixrow"),
+        body.replacen("<OMI>4</OMI>", "", 1),
+        body.replace(r#"cd="linalg3""#, r#"cd="foreign""#),
+        r#"<OMA><OMS cd="linalg3" name="matrix"/></OMA>"#.to_owned(),
+        r#"<OMA><OMS cd="linalg3" name="matrix"/><OMA><OMS cd="linalg3" name="matrixcolumn"/></OMA></OMA>"#.to_owned(),
+    ] {
+        assert!(import(object(&bad).as_bytes()).is_err(), "{bad}");
+    }
+}

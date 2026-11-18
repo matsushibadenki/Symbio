@@ -154,9 +154,9 @@ fn objects_functions_symbols_negation_and_constants_have_explicit_meanings() {
 #[test]
 fn unsupported_or_ambiguous_numbers_metadata_shapes_and_contexts_fail() {
     for v in [
-        json!(0.1),
-        json!({"num":"0.1"}),
-        json!({"num":"1e50"}),
+        json!({"num":"0.1","precision":0}),
+        json!({"num":"0.1","precision":null}),
+        json!({"num":"1e","precision":3}),
         json!("Infinity"),
         json!("NaN"),
         json!("GoldenRatio"),
@@ -552,5 +552,61 @@ fn polynomial_exponential_integrals_compute_exact_definite_values() {
     assert_eq!(
         c.snapshot().cells[0].cell.calculation_error.as_deref(),
         Some("unsupported")
+    );
+}
+
+#[test]
+fn decimal_literals_and_declared_precision_survive_project_storage() {
+    let input = br#"["Add", 1, ["Rational", 1, 8], 1.2300, {"num":"3.141592653589793238462643","precision":24}, "2.00e-30", {"num":"2","precision":1}]"#;
+    let core = import(input).unwrap();
+    let project = core.project();
+    let literals: Vec<_> = project
+        .graph
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            graph::Node::Approximate { decimal, precision } => Some((decimal.as_str(), *precision)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        literals,
+        [
+            ("1.2300", None),
+            ("3.141592653589793238462643", Some(24)),
+            ("2.00e-30", None),
+            ("2", Some(1))
+        ]
+    );
+    assert!(
+        project
+            .graph
+            .nodes
+            .iter()
+            .any(|node| matches!(node, graph::Node::Div(a, b) if project.graph.text(*a) == "1" && project.graph.text(*b) == "8"))
+    );
+    assert_eq!(
+        core.snapshot().cells[0].cell.output.as_ref().unwrap().trust,
+        Trust::Approximate
+    );
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("approx.symbio");
+    symbio_core::ProjectStore::open(&path)
+        .unwrap()
+        .save(project)
+        .unwrap();
+    let reloaded = symbio_core::ProjectStore::open(&path)
+        .unwrap()
+        .load()
+        .unwrap()
+        .unwrap();
+    let output = export(&reloaded, 1).unwrap();
+    assert_eq!(output.expression, export(project, 1).unwrap().expression);
+    let serialized = to_bytes(&output).unwrap();
+    let imported = import(&serialized).unwrap();
+    assert_eq!(
+        export(imported.project(), 1).unwrap().expression,
+        output.expression
     );
 }

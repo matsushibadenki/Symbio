@@ -264,6 +264,7 @@ fn preview_fits(g: &Graph, root: Id) -> bool {
         let node = &g.nodes[id];
         let mut n = 256
             + match node {
+                graph::Node::Approximate { decimal, .. } => decimal.len(),
                 graph::Node::Number(s)
                 | graph::Node::Symbol(s)
                 | graph::Node::Constant(s)
@@ -518,7 +519,9 @@ pub fn verify_with_cas(package: &Package, allow_cas: bool) -> Result<Report> {
                         .filter(|_| !row.result_preview_omitted)
                         .and_then(|o| {
                             o.root.map(|r| {
-                                if o.trust == Trust::Approximate {
+                                if o.trust == Trust::Approximate
+                                    && !project.graph.contains_approximate(r)
+                                {
                                     project.graph.approximate_mathml(r)
                                 } else {
                                     project.graph.mathml(r)

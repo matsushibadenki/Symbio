@@ -322,12 +322,21 @@ fn decode(e: &Element) -> Result<Value> {
                     ]
                 ]));
             }
-            if (cd, name) == ("linalg2", "matrix") {
+            if matches!(cd, "linalg2" | "linalg3") && name == "matrix" {
+                let column_major = cd == "linalg3";
                 let mut rows = vec![json!("List")];
                 for row in &e.children[1..] {
                     row.check("OMA", &[], false)?;
                     let h = row.children.first().ok_or_else(unsupported)?;
-                    if h.symbol()? != ("linalg2", "matrixrow")
+                    if h.symbol()?
+                        != (
+                            cd,
+                            if column_major {
+                                "matrixcolumn"
+                            } else {
+                                "matrixrow"
+                            },
+                        )
                         || h.attrs.get("cdbase").is_some_and(|b| b == CONTEXT_BASE)
                     {
                         return Err(unsupported());
@@ -337,6 +346,23 @@ fn decode(e: &Element) -> Result<Value> {
                         entries.push(decode(entry)?);
                     }
                     rows.push(Value::Array(entries));
+                }
+                if column_major {
+                    let columns: Vec<_> = rows[1..]
+                        .iter()
+                        .map(|column| column.as_array().ok_or_else(unsupported))
+                        .collect::<Result<_>>()?;
+                    let height = columns.first().ok_or_else(unsupported)?.len();
+                    if height < 2 || columns.iter().any(|column| column.len() != height) {
+                        return Err(unsupported());
+                    }
+                    let mut converted = vec![json!("List")];
+                    for index in 1..height {
+                        let mut row = vec![json!("List")];
+                        row.extend(columns.iter().map(|column| column[index].clone()));
+                        converted.push(Value::Array(row));
+                    }
+                    return Ok(Value::Array(converted));
                 }
                 return Ok(Value::Array(rows));
             }

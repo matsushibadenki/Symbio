@@ -32,6 +32,7 @@ Mappings follow the [OpenMath XML standard](https://openmath.org/standard/om20-2
 | `arith1.sum` / `product` over `interval1.integer_interval(a, b)` and a unary lambda | Inclusive finite sum/product |
 | `linalg1.determinant` | Exact determinant of a square matrix |
 | `linalg1.transpose` | Transpose of a rectangular matrix |
+| `linalg3.matrix` with `matrixcolumn` children | Column-oriented input converted to the same row-oriented SEG matrix |
 | `relation1.eq` | Binary equality |
 | `linalg2.matrix` containing `linalg2.matrixrow` | Row-oriented rectangular matrix constructor, up to 8×8 |
 
@@ -74,3 +75,7 @@ Input/output are bounded to 1 MiB, XML stack depth to at most 49 elements, and e
 DTD, external entities, processing instructions, CDATA, `OMR` references, `OMFOREIGN`, approximate `OMF`, nondecimal integer encodings, arbitrary function heads/dictionaries, unknown attributes, vector objects, general/standalone function binders, solution sets and other matrix arithmetic are rejected. No XML-related file/network lookup, TeX execution or external CAS is performed. Root/object sharing IDs and `xml:base` are not accepted. XML declarations, comments and formatting whitespace do not carry instructions to the application.
 
 `python3 scripts/smoke-openmath.py` exercises real CLI/XML roundtrips, exact large rationals, context retention, immutable sources, no-clobber writes and DTD rejection. Core tests also cover namespace resolution/shadowing, unknown semantic data, resource limits, equations, matrices, calculus binding/scope, arbitrary-constant conditions and domain errors. Third-party CAS import/export and full OpenMath schema/ecosystem conformance remain unverified; only the documented phrasebook is claimed.
+
+## Column-oriented matrix input
+
+The experimental [linalg3 dictionary](https://openmath.org/cd/linalg3.html) describes matrices as columns. Symbio accepts nonempty rectangular matrices built from its matrixcolumn constructor, preserving entry order and shape during conversion to SEG. The existing 8×8 bound applies. Export uses the supported linalg2 row representation. Mixed row/column constructors, empty columns, ragged columns and standalone vectors are rejected. Existing determinant and transpose operators can wrap either supported matrix representation. Third-party application exchange has not been tested.

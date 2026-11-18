@@ -18,6 +18,10 @@ pub const MAX_SOLUTIONS: usize = 32;
 )]
 pub enum Node {
     Number(String),
+    Approximate {
+        decimal: String,
+        precision: Option<u32>,
+    },
     Symbol(String),
     Reference(String),
     Add(Id, Id),
@@ -134,6 +138,9 @@ impl Graph {
             }
             depths.push(d);
             match n {
+                Node::Approximate { decimal, precision } => {
+                    validate_approximate(decimal, *precision)?
+                }
                 Node::Number(s) => {
                     let r = rational(s)?;
                     if rat_text(&r) != *s {
@@ -348,9 +355,11 @@ impl Graph {
             | Node::Matrix { .. }
             | Node::Equation(..)
             | Node::Solutions { .. } => self.structured_math(id, depth)?,
-            Node::Number(_) | Node::Symbol(_) | Node::Reference(_) | Node::Constant(_) => {
-                self.format(id, true, depth)?
-            }
+            Node::Approximate { .. }
+            | Node::Number(_)
+            | Node::Symbol(_)
+            | Node::Reference(_)
+            | Node::Constant(_) => self.format(id, true, depth)?,
             Node::Add(a, b) => {
                 let negative = match self.nodes[*a] {
                     Node::Sub(zero, body) if self.value(zero).is_some_and(|v| v.is_zero()) => {
@@ -496,6 +505,13 @@ impl Graph {
                     .join(", ")
             ),
 
+            Node::Approximate { decimal, .. } => {
+                if math {
+                    format!("<mrow><mo>≈</mo><mn>{decimal}</mn></mrow>")
+                } else {
+                    format!("≈{decimal}")
+                }
+            }
             Node::Number(n) => {
                 if math {
                     if let Some((a, b)) = n.split_once('/') {
@@ -694,6 +710,21 @@ impl Graph {
             _ => return Err(Error::Invalid("structured display".into())),
         })
     }
+    pub(crate) fn contains_approximate(&self, root: Id) -> bool {
+        let mut seen = BTreeSet::new();
+        let mut pending = vec![root];
+        while let Some(id) = pending.pop() {
+            if seen.insert(id) {
+                let node = &self.nodes[id];
+                if matches!(node, Node::Approximate { .. }) {
+                    return true;
+                }
+                pending.extend(node.children());
+            }
+        }
+        false
+    }
+
     pub fn numeric(&self, id: Id, vars: &BTreeMap<String, f64>) -> Result<f64> {
         let mut values: HashMap<Id, f64> = HashMap::new();
         let mut reachable = BTreeSet::new();
@@ -705,6 +736,9 @@ impl Graph {
         }
         for i in reachable {
             let v = match &self.nodes[i] {
+                Node::Approximate { decimal, .. } => {
+                    decimal.parse::<f64>().map_err(|_| Error::Limit)?
+                }
                 Node::Number(s) => rational(s)?.to_f64().ok_or(Error::Limit)?,
                 Node::Constant(s) => {
                     if s == "pi" {
@@ -776,4 +810,17 @@ pub fn symbol_math(s: &str) -> String {
     } else {
         format!("<mi>{glyph}</mi>")
     }
+}
+
+pub(crate) fn validate_approximate(decimal: &str, precision: Option<u32>) -> Result<()> {
+    if decimal.len() > 1024
+        || !decimal
+            .bytes()
+            .all(|b| b.is_ascii_digit() || b".eE+-".contains(&b))
+        || decimal.parse::<serde_json::Number>().is_err()
+        || precision.is_some_and(|digits| !(1..=4096).contains(&digits))
+    {
+        return Err(Error::Invalid("approximate number".into()));
+    }
+    Ok(())
 }

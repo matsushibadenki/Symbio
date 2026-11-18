@@ -10,6 +10,7 @@ use serde::Serialize;
 #[derive(Clone, Debug, PartialEq)]
 enum Token {
     Number(String),
+    Approximate(String, Option<u32>),
     Symbol(String),
     Reference(String),
     Command(String),
@@ -93,6 +94,29 @@ pub fn parse(graph: &mut Graph, source: &str) -> Result<Id> {
                 let name: String = chars[start..i].iter().collect();
                 match name.as_str() {
                     "quad" | "qquad" | "displaystyle" => continue,
+                    "symbioapprox" => {
+                        if chars.get(i) != Some(&'{') {
+                            return Err(Error::Parse(i));
+                        }
+                        i += 1;
+                        let start = i;
+                        while i < chars.len() && chars[i] != '}' {
+                            i += 1;
+                        }
+                        if chars.get(i) != Some(&'}') {
+                            return Err(Error::Parse(i));
+                        }
+                        let literal: String = chars[start..i].iter().collect();
+                        i += 1;
+                        let (decimal, precision) =
+                            if let Some((decimal, digits)) = literal.split_once(':') {
+                                (decimal, Some(digits.parse().map_err(|_| Error::Parse(i))?))
+                            } else {
+                                (literal.as_str(), None)
+                            };
+                        crate::graph::validate_approximate(decimal, precision)?;
+                        Token::Approximate(decimal.into(), precision)
+                    }
                     "cell" => {
                         if chars.get(i) != Some(&'{') {
                             return Err(Error::Parse(i));
@@ -233,6 +257,9 @@ impl Parser<'_> {
             return Err(Error::Limit);
         }
         match self.take() {
+            Token::Approximate(decimal, precision) => {
+                self.graph.intern(Node::Approximate { decimal, precision })
+            }
             Token::Number(s) => parser::parse(self.graph, &s),
             Token::Reference(s) => self.graph.intern(Node::Reference(s)),
             Token::Symbol(mut s) => {
@@ -505,7 +532,8 @@ impl Parser<'_> {
                 Token::Op('*') => ('*', 3, 4, false),
                 Token::Op('/') => ('/', 3, 4, false),
                 Token::Op('^') => ('^', 7, 6, false),
-                Token::Number(_)
+                Token::Approximate(..)
+                | Token::Number(_)
                 | Token::Symbol(_)
                 | Token::Reference(_)
                 | Token::Op('(' | '{' | '[') => ('*', 3, 4, true),
@@ -583,6 +611,10 @@ fn tex(g: &Graph, id: Id, depth: usize) -> Result<String> {
     }
     let f = |id| tex(g, id, depth + 1);
     let out = match &g.nodes[id] {
+        Node::Approximate { decimal, precision } => match precision {
+            Some(digits) => format!(r"\symbioapprox{{{decimal}:{digits}}}"),
+            None => format!(r"\symbioapprox{{{decimal}}}"),
+        },
         Node::Number(n) => {
             if let Some((a, b)) = n.split_once('/') {
                 format!(r"\frac{{{a}}}{{{b}}}")

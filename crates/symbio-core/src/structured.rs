@@ -858,7 +858,11 @@ pub fn numeric(
             "choose an integration constant before numeric evaluation".into(),
         ));
     }
-    let id = algebra::simplify(g, id, a)?;
+    let id = if g.contains_approximate(id) {
+        id
+    } else {
+        algebra::simplify(g, id, a)?
+    };
     fn go(g: &mut Graph, id: Id, b: &BTreeMap<String, f64>) -> Result<Id> {
         let node = g.nodes[id].clone();
         match node {
