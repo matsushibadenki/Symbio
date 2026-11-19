@@ -155,7 +155,7 @@ fn xml_and_unknown_semantics_are_rejected_without_resolution() {
         r#"<OMI>1e3</OMI>"#,
         r#"<OMATTR><OMATP><OMS cd="unknown" name="type"/><OMI>1</OMI></OMATP><OMV name="x"/></OMATTR>"#,
         r#"<OMA><OMS cd="arith1" name="plus"/><OMI>1</OMI></OMA>"#,
-        r#"<OMA><OMV name="f"/><OMI>1</OMI></OMA>"#,
+        r#"<OMA><OMI>2</OMI><OMI>1</OMI></OMA>"#,
         r#"<OMI>&xxe;</OMI>"#,
         r#"<OMI><![CDATA[2]]></OMI>"#,
         r#"<OMV name="x" xml:base="http://evil.invalid"/>"#,
@@ -180,23 +180,7 @@ fn xml_and_unknown_semantics_are_rejected_without_resolution() {
     ));
 }
 #[test]
-fn export_scope_and_atomic_no_clobber_are_explicit() {
-    let mut c = AppCore::new(Project::empty("Scope").unwrap()).unwrap();
-    for source in [
-        r"\begin{bmatrix}1\end{bmatrix}^2",
-        r"\begin{bmatrix}1\end{bmatrix}+\begin{bmatrix}2\end{bmatrix}",
-    ] {
-        let id = (!c.project().current().cells.is_empty()).then_some(1);
-        edit(
-            &mut c,
-            Command::DefineLatex {
-                id,
-                name: "f".into(),
-                source: source.into(),
-            },
-        );
-        assert!(export(c.project(), 1).is_err());
-    }
+fn atomic_no_clobber_is_explicit() {
     let c = load("<OMI>7</OMI>");
     let bytes = export(c.project(), 1).unwrap();
     let dir = tempfile::tempdir().unwrap();
@@ -540,4 +524,196 @@ fn column_oriented_matrices_preserve_rectangular_orientation() {
     ] {
         assert!(import(object(&bad).as_bytes()).is_err(), "{bad}");
     }
+}
+
+#[test]
+fn matrix_products_exchange_in_operand_order() {
+    use serde_json::json;
+    let left = json!(["List", ["List", 1, 2]]);
+    let right = json!(["List", ["List", 3], ["List", 4]]);
+    for (a, b, expected) in [
+        (&left, &right, json!(["List", ["List", 11]])),
+        (
+            &right,
+            &left,
+            json!(["List", ["List", 3, 6], ["List", 4, 8]]),
+        ),
+    ] {
+        let c = from_mathjson(json!(["MatrixMultiply", a, b]));
+        let xml = String::from_utf8(export(c.project(), 1).unwrap()).unwrap();
+        assert!(xml.contains(r#"<OMS cd="arith1" name="times"/>"#));
+        let copy = import(xml.as_bytes()).unwrap();
+        assert_eq!(
+            copy.snapshot().cells[0].result_text,
+            from_mathjson(expected).snapshot().cells[0].result_text
+        );
+        assert_eq!(
+            symbio_core::mathjson::export(copy.project(), 1)
+                .unwrap()
+                .expression[0],
+            "MatrixMultiply"
+        );
+    }
+
+    let row = r#"<OMA><OMS cd="linalg2" name="matrix"/><OMA><OMS cd="linalg2" name="matrixrow"/><OMI>1</OMI><OMI>2</OMI></OMA></OMA>"#;
+    let invalid = format!(r#"<OMA><OMS cd="arith1" name="times"/>{row}{row}</OMA>"#);
+    assert!(import(object(&invalid).as_bytes()).is_err());
+}
+
+#[test]
+fn matrix_sums_and_differences_roundtrip_with_exact_entries() {
+    use serde_json::json;
+
+    let left = json!(["List", ["List", ["Rational", 1, 2], 5]]);
+    let right = json!(["List", ["List", ["Rational", 1, 3], 8]]);
+    for (head, symbol, fraction, second) in [("Add", "plus", 5, 13), ("Subtract", "minus", 1, -3)] {
+        let source = from_mathjson(json!([head, left, right]));
+        let xml = String::from_utf8(export(source.project(), 1).unwrap()).unwrap();
+        let operator = format!(r#"<OMS cd="arith1" name="{symbol}"/>"#);
+        assert!(xml.contains(&operator));
+        let imported = import(xml.as_bytes()).unwrap();
+        let expected = from_mathjson(json!(["List", ["List", ["Rational", fraction, 6], second]]));
+        assert_eq!(
+            imported.snapshot().cells[0].result_text,
+            expected.snapshot().cells[0].result_text
+        );
+        assert_eq!(
+            symbio_core::mathjson::export(imported.project(), 1)
+                .unwrap()
+                .expression[0],
+            head
+        );
+
+        let matrix = r#"<OMA><OMS cd="linalg2" name="matrix"/><OMA><OMS cd="linalg2" name="matrixrow"/><OMI>1</OMI></OMA></OMA>"#;
+        let wide = matrix.replace("<OMI>1</OMI>", "<OMI>1</OMI><OMI>2</OMI>");
+        for invalid in [wide.as_str(), "<OMI>1</OMI>"] {
+            assert!(
+                import(object(&format!("<OMA>{operator}{matrix}{invalid}</OMA>")).as_bytes())
+                    .is_err()
+            );
+        }
+    }
+}
+
+#[test]
+fn inverse_roundtrip_preserves_exact_result_and_singular_error() {
+    use serde_json::json;
+    for (matrix, singular) in [
+        (json!(["List", ["List", 2, 1], ["List", 0, 3]]), false),
+        (json!(["List", ["List", 1, 2], ["List", 2, 4]]), true),
+    ] {
+        let source = from_mathjson(json!(["Inverse", matrix]));
+        let expected = symbio_core::mathjson::export(source.project(), 1)
+            .unwrap()
+            .expression;
+        let xml = String::from_utf8(export(source.project(), 1).unwrap()).unwrap();
+        assert!(xml.contains(r#"<OMS cd="arith1" name="power"/>"#));
+        assert!(xml.contains("<OMI>-1</OMI>"));
+        let imported = import(xml.as_bytes()).unwrap();
+        let exchanged = symbio_core::mathjson::export(imported.project(), 1).unwrap();
+        assert_eq!(exchanged.expression, expected);
+        let returned =
+            symbio_core::mathjson::import(&symbio_core::mathjson::to_bytes(&exchanged).unwrap())
+                .unwrap();
+        for core in [&imported, &returned] {
+            let snapshot = core.snapshot();
+            let cell = &snapshot.cells[0];
+            if singular {
+                assert_eq!(cell.cell.calculation_error.as_deref(), Some("domain_error"));
+                assert!(cell.result_text.is_none());
+            } else {
+                let exact = from_mathjson(json!([
+                    "List",
+                    ["List", ["Rational", 1, 2], ["Rational", -1, 6]],
+                    ["List", 0, ["Rational", 1, 3]]
+                ]));
+                assert_eq!(cell.result_text, exact.snapshot().cells[0].result_text);
+            }
+        }
+    }
+}
+
+#[test]
+fn matrix_powers_exchange_authored_exponents_and_exact_results() {
+    use serde_json::json;
+    let matrix = json!(["List", ["List", 2, 0], ["List", 0, 3]]);
+    for (exponent, expected) in [
+        (0, "matrix(2x2; 1, 0, 0, 1)"),
+        (2, "matrix(2x2; 4, 0, 0, 9)"),
+        (-2, "matrix(2x2; 1/4, 0, 0, 1/9)"),
+    ] {
+        let original = from_mathjson(json!(["Power", matrix, exponent]));
+        let copy = roundtrip(&original);
+        assert_eq!(
+            copy.snapshot().cells[0].result_text.as_deref(),
+            Some(expected)
+        );
+        let authored = symbio_core::mathjson::export(original.project(), 1).unwrap();
+        let exchanged = symbio_core::mathjson::export(copy.project(), 1).unwrap();
+        assert_eq!(authored.expression, exchanged.expression);
+        assert_eq!(exchanged.expression[0], "Power");
+    }
+
+    let singular = json!(["List", ["List", 1, 2], ["List", 2, 4]]);
+    let copy = roundtrip(&from_mathjson(json!(["Power", singular, -2])));
+    assert_eq!(
+        copy.snapshot().cells[0].cell.calculation_error.as_deref(),
+        Some("domain_error")
+    );
+}
+
+#[test]
+fn matrix_scalar_division_roundtrips_exact_values_and_zero_error() {
+    use serde_json::json;
+    let matrix = json!(["List", ["List", 1, 2], ["List", 3, 4]]);
+    for denominator in [3, 0] {
+        let source = from_mathjson(json!(["Divide", matrix, denominator]));
+        let xml = String::from_utf8(export(source.project(), 1).unwrap()).unwrap();
+        assert!(xml.contains(r#"<OMS cd="arith1" name="divide"/>"#));
+        let imported = roundtrip(&source);
+        let exchange = symbio_core::mathjson::export(imported.project(), 1).unwrap();
+        assert_eq!(exchange.expression[0], "Divide");
+        let copy =
+            symbio_core::mathjson::import(&symbio_core::mathjson::to_bytes(&exchange).unwrap())
+                .unwrap();
+        for core in [&imported, &copy] {
+            let snapshot = core.snapshot();
+            let cell = &snapshot.cells[0];
+            if denominator == 0 {
+                assert_eq!(cell.cell.calculation_error.as_deref(), Some("domain_error"));
+                assert!(cell.result_text.is_none());
+            } else {
+                assert_eq!(
+                    cell.result_text.as_deref(),
+                    Some("matrix(2x2; 1/3, 2/3, 1, 4/3)")
+                );
+            }
+        }
+    }
+    let matrix = r#"<OMA><OMS cd="linalg2" name="matrix"/><OMA><OMS cd="linalg2" name="matrixrow"/><OMI>2</OMI></OMA></OMA>"#;
+    let invalid = format!(r#"<OMA><OMS cd="arith1" name="divide"/>{matrix}{matrix}</OMA>"#);
+    assert!(import(object(&invalid).as_bytes()).is_err());
+}
+
+#[test]
+fn named_applications_preserve_argument_order_and_nesting() {
+    use serde_json::json;
+    let body = r#"<OMA><OMV name="outer_2"/><OMV name="y"/><OMA><OMV name="inner"/><OMI>2</OMI><OMV name="x"/></OMA><OMI>1</OMI><OMA><OMV name="constant_fn"/></OMA></OMA>"#;
+    let core = load(body);
+    let expected = json!(["Apply", {"sym":"outer_2"}, "y",
+        ["Apply", {"sym":"inner"}, {"num":"2"}, "x"], {"num":"1"},
+        ["Apply", {"sym":"constant_fn"}]]);
+    let exchange = symbio_core::mathjson::export(core.project(), 1).unwrap();
+    assert_eq!(exchange.expression, expected);
+    let imported =
+        symbio_core::mathjson::import(&symbio_core::mathjson::to_bytes(&exchange).unwrap())
+            .unwrap();
+    let xml = String::from_utf8(export(imported.project(), 1).unwrap()).unwrap();
+    assert!(xml.contains(body));
+    let copy = roundtrip(&imported);
+    assert_eq!(
+        copy.snapshot().cells[0].result_text.as_deref(),
+        Some("outer_2(y, inner(2, x), 1, constant_fn())")
+    );
+    assert!(import(object(&body.replace("outer_2", "bad-name")).as_bytes()).is_err());
 }

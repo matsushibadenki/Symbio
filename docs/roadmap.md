@@ -54,7 +54,16 @@
 - 🟢 [Done] MathJSONの逆行列InverseをSEG・LaTeXと既存Rustの厳密行列演算へ接続。非正方行列・スカラー指定を拒否し、特異行列の定義とdomain errorを往復保持。
 - 🟢 [Done] OpenMathの列形式行列linalg3.matrix／matrixcolumnをSEGへ変換。非正方行列の向き・転置・行形式への書き出しを保持し、不揃いな列・空行列・混在形式を拒否。
 - 🟢 [Done] MathJSONの近似数を専用SEGノードに保持。10進表記・末尾ゼロ・指定精度を文書保存、再読込、MathJSON書き出しで維持。
-- 🟠 [Next] OpenMathの一般関数適用・残る行列演算・追加辞書と外部実装との交換検証。標準ライブラリ全体の対応は未完了。
+- 🟢 [Done] OpenMathの行列積とスカラー倍を arith1.times で交換。積の順序と原式を保持し、次元不一致を拒否。MathJSONのMatrixMultiplyとの往復を検証。
+- 🟢 [Done] OpenMathの行列加減算を arith1.plus／minus で入出力し、有理数成分・原式・引数の順序を保持。同じ形状の行列に対応。
+- 🟢 [Done] OpenMathの逆行列を arith1.power の指数 −1 で入出力。MathJSON Inverse との往復で原式・厳密な有理数結果・特異行列エラーを保持。
+- 🟢 [Done] OpenMathの正方行列の累乗を入出力。指数0・正・負の厳密結果、MathJSONとの原式保持、特異行列の負の累乗エラーを検証。
+- 🟢 [Done] OpenMathの行列のスカラー除算を arith1.divide で入出力。MathJSONとの往復で原式・厳密な有理数結果・ゼロ除算エラーを保持。
+- 🟢 [Done] OpenMathのOMVを先頭に持つ名前付き関数適用をMathJSON Applyと相互変換。関数名・引数順・入れ子を保持。
+- 🟢 [Done] 外部のOpenMath実装py-openmath 0.3.0でXMLを再出力し、Symbioへ再読込。行列演算の原式・厳密結果・定義域エラーと、一般関数の名前・引数順・入れ子を12ケースで照合。
+- 🟢 [Done] py-openmathで復号したOpenMathをSymPy 1.14.0で評価し、積・逆行列・累乗・スカラー除算を含む9件の厳密結果と、特異行列・ゼロ除算の扱いをSymbioと比較。
+- 🟢 [Done] トレースと階数をMathJSON／OpenMathで相互交換。SymPyと有理数トレース、長方形・階数落ち・ゼロ行列の階数を厳密比較。
+- 🟠 [Next] OpenMathの残る行列演算・追加辞書と外部CAS検証の拡充。標準ライブラリ全体の対応は未完了。
 - 🔴 [Later] 開いている全文書のセッション復元・一括保存・クラッシュ回復。
 
 ## 02 · 計算と信頼性

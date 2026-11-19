@@ -65,3 +65,7 @@ The codec preserves authored operators, nested scope, free parameters in bounds 
 Omitted variables, partial tuples, more than one limit argument per head, infinite bounds, higher-order count syntax, function literals, `ND` and `NIntegrate` are rejected. Higher derivatives can be represented with nested `D`. Plain `"D"` remains an ordinary physical symbol, distinct from the array-headed operator. No variable is inferred from a name or from LaTeX spelling. The envelope version remains 1: existing exact expressions retain their meanings and the supported subset grows additively.
 
 Approximate literals use the editable notebook notation `\symbioapprox{1.2300:5}` and display with an approximation marker. Symbolic evaluation keeps the authored expression with approximate trust. Use numeric evaluation for float64 computation. The declared digit count describes the input and supplies no error bound or arbitrary-precision computation. Decimal lexemes are limited to 1024 bytes and subject to the notebook source limit.
+
+Named symbolic applications can be exchanged as `["Apply", {"sym":"f"}, "x"]`. The explicit symbol identifies the function and the remaining entries are its ordered scalar arguments. Nested applications are supported.
+
+`Trace` takes one square matrix and sums its diagonal entries. `Rank` takes one rectangular matrix and evaluates the rank by exact rational elimination when its entries reduce to rationals. Both operator heads survive OpenMath exchange.

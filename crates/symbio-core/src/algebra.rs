@@ -61,9 +61,10 @@ pub fn simplify(g: &mut Graph, root: Id, a: &Assumptions) -> Result<Id> {
         }
         let result = match n {
             Node::Number(_) | Node::Symbol(_) => id,
+            Node::Apply(name, _) => g.intern(Node::Apply(name, out))?,
             Node::Call(f, _) => {
                 let v = out[0];
-                if ["det", "inverse", "transpose"].contains(&f.as_str()) {
+                if ["det", "inverse", "transpose", "trace", "rank"].contains(&f.as_str()) {
                     let r = crate::structured::matrix_call(g, &f, v, a)?;
                     memo.insert(id, r);
                     return Ok(r);
@@ -445,6 +446,7 @@ pub fn dimension(
                 _ => Ok(None),
             }
         }
+        Node::Apply(..) => Ok(None),
         Node::Call(f, a) => {
             let dim = d(*a)?;
             if f == "abs" {

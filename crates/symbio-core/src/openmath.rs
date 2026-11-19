@@ -224,6 +224,7 @@ const MAPPINGS: &[(&str, &str, &str)] = &[
     ("rounding1", "ceiling", "Ceil"),
     ("linalg1", "determinant", "Determinant"),
     ("linalg1", "transpose", "Transpose"),
+    ("linalg4", "rank", "Rank"),
 ];
 fn decode(e: &Element) -> Result<Value> {
     match e.name.as_str() {
@@ -287,7 +288,20 @@ fn decode(e: &Element) -> Result<Value> {
                 }
                 return Ok(json!([head, decode(body)?, variable]));
             }
+            if first.name == "OMV" {
+                let mut args = vec![json!("Apply")];
+                for child in &e.children {
+                    args.push(decode(child)?);
+                }
+                return Ok(Value::Array(args));
+            }
             let (cd, name) = first.symbol()?;
+            if first.attrs.get("cdbase").map(String::as_str) == Some(CONTEXT_BASE)
+                && (cd, name) == ("symbio_linalg1", "trace")
+                && e.children.len() == 2
+            {
+                return Ok(json!(["Trace", decode(&e.children[1])?]));
+            }
             if first.attrs.get("cdbase").is_some_and(|b| b == CONTEXT_BASE) {
                 return Err(unsupported());
             }
@@ -382,6 +396,24 @@ fn decode(e: &Element) -> Result<Value> {
             for child in &e.children[1..if head == "Sqrt" { 2 } else { e.children.len() }] {
                 args.push(decode(child)?);
             }
+            if head == "Power"
+                && args.len() == 3
+                && args[2]
+                    .get("num")
+                    .and_then(Value::as_str)
+                    .and_then(|n| n.strip_prefix('-'))
+                    .is_some_and(|n| n.trim_start_matches('0') == "1")
+            {
+                let mut graph = graph::Graph::default();
+                let base = mathjson::decode(&mut graph, &args[1])?;
+                if matches!(
+                    structured::shape(&graph, base)?,
+                    structured::Shape::Matrix(..)
+                ) {
+                    args[0] = json!("Inverse");
+                    args.pop();
+                }
+            }
             Ok(Value::Array(args))
         }
         _ => Err(unsupported()),
@@ -399,8 +431,16 @@ fn check_scope(expression: &Value) -> Result<()> {
     let root = mathjson::decode(&mut graph, expression)?;
     structured::shape(&graph, root)?;
     for (id, node) in graph.nodes.iter().enumerate() {
-        if !matches!(node, graph::Node::Matrix { .. } | graph::Node::Equation(..))
-            && !matches!(node, graph::Node::Call(f, _) if f == "transpose")
+        if !matches!(
+            node,
+            graph::Node::Matrix { .. }
+                | graph::Node::Equation(..)
+                | graph::Node::Mul(..)
+                | graph::Node::Add(..)
+                | graph::Node::Sub(..)
+                | graph::Node::Div(..)
+                | graph::Node::Pow(..)
+        ) && !matches!(node, graph::Node::Call(f, _) if f == "transpose" || f == "inverse")
             && structured::shape(&graph, id)? != structured::Shape::Scalar
         {
             return Err(unsupported());
@@ -486,6 +526,19 @@ fn encode(v: &Value) -> Result<String> {
     }
     let a = v.as_array().ok_or_else(unsupported)?;
     let head = a.first().and_then(Value::as_str).ok_or_else(unsupported)?;
+    if head == "Apply" {
+        let name = a
+            .get(1)
+            .and_then(|value| value.get("sym"))
+            .and_then(Value::as_str)
+            .ok_or_else(unsupported)?;
+        let mut xml = format!("<OMA><OMV name=\"{}\"/>", escape(name));
+        for arg in &a[2..] {
+            xml.push_str(&encode(arg)?);
+        }
+        xml.push_str("</OMA>");
+        return Ok(xml);
+    }
     if matches!(head, "D" | "Integrate" | "Sum" | "Product") {
         let body = encode(&a[1])?;
         if let Some(variable) = a[2].as_str() {
@@ -535,8 +588,23 @@ fn encode(v: &Value) -> Result<String> {
         result.push_str("</OMA>");
         return Ok(result);
     }
+    if head == "Trace" {
+        return Ok(format!(
+            "<OMA><OMS cdbase=\"{CONTEXT_BASE}\" cd=\"symbio_linalg1\" name=\"trace\"/>{}</OMA>",
+            encode(&a[1])?
+        ));
+    }
+    if head == "Inverse" {
+        return Ok(format!(
+            "<OMA>{}{}<OMI>-1</OMI></OMA>",
+            symbol("arith1", "power"),
+            encode(&a[1])?
+        ));
+    }
     let h = if head == "Sqrt" {
         symbol("arith1", "root")
+    } else if head == "MatrixMultiply" {
+        symbol("arith1", "times")
     } else {
         let m = MAPPINGS
             .iter()

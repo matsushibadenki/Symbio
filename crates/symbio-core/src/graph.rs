@@ -30,6 +30,7 @@ pub enum Node {
     Div(Id, Id),
     Pow(Id, Id),
     Call(String, Id),
+    Apply(String, Vec<Id>),
     Constant(String),
     Integral {
         body: Id,
@@ -78,6 +79,7 @@ impl Node {
             Self::Aggregate {
                 body, lower, upper, ..
             } => vec![*body, *lower, *upper],
+            Self::Apply(_, args) => args.clone(),
             Self::Matrix { entries, .. } => entries.clone(),
             Self::Solutions { values, .. } => values.clone(),
             _ => vec![],
@@ -152,6 +154,9 @@ impl Graph {
                         return Err(Error::Invalid("symbol".into()));
                     }
                 }
+                Node::Apply(name, args) if !valid_symbol(name) || args.len() > 32 => {
+                    return Err(Error::Invalid("function application".into()));
+                }
                 Node::Call(f, _)
                     if ![
                         "sin",
@@ -161,6 +166,8 @@ impl Graph {
                         "sqrt",
                         "abs",
                         "det",
+                        "trace",
+                        "rank",
                         "transpose",
                         "inverse",
                         "floor",
@@ -409,6 +416,7 @@ impl Graph {
                 }
                 format!("<msup>{base}{}</msup>", f(*b, 0)?)
             }
+            Node::Apply(..) => self.format(id, true, depth)?,
             Node::Call(name, a) => {
                 let a = f(*a, 0)?;
                 match name.as_str() {
@@ -521,6 +529,18 @@ impl Graph {
                     }
                 } else {
                     n.clone()
+                }
+            }
+            Node::Apply(name, args) => {
+                let arguments = args.iter().map(|arg| f(*arg)).collect::<Result<Vec<_>>>()?;
+                if math {
+                    format!(
+                        "<mrow>{}<mo>(</mo>{}<mo>)</mo></mrow>",
+                        symbol_math(name),
+                        arguments.join("<mo>,</mo>")
+                    )
+                } else {
+                    format!("{name}({})", arguments.join(", "))
                 }
             }
             Node::Symbol(s) => {

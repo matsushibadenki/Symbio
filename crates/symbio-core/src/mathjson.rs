@@ -156,6 +156,23 @@ pub fn decode(g: &mut Graph, v: &Value) -> Result<Id> {
         let a = head(v).ok_or_else(unsupported)?;
         let f = a.first().and_then(Value::as_str).ok_or_else(unsupported)?;
         let args = &a[1..];
+        if f == "Apply" {
+            let (name, args) = args.split_first().ok_or_else(unsupported)?;
+            let name = name
+                .get("sym")
+                .and_then(Value::as_str)
+                .filter(|symbol| graph::valid_symbol(symbol))
+                .filter(|_| name.as_object().is_some_and(|object| object.len() == 1))
+                .ok_or_else(unsupported)?;
+            if args.len() > 32 {
+                return Err(Error::Limit);
+            }
+            let args = args
+                .iter()
+                .map(|arg| go(g, arg, depth + 1, budget))
+                .collect::<Result<Vec<_>>>()?;
+            return g.intern(Node::Apply(name.into(), args));
+        }
         if matches!(f, "D" | "Integrate" | "Sum" | "Product") {
             if args.len() != 2 {
                 return Err(unsupported());
@@ -255,18 +272,21 @@ pub fn decode(g: &mut Graph, v: &Value) -> Result<Id> {
             structured::shape(g, root)?;
             return Ok(root);
         }
-        if matches!(f, "Determinant" | "Transpose" | "Inverse") {
+        if matches!(
+            f,
+            "Determinant" | "Transpose" | "Inverse" | "Trace" | "Rank"
+        ) {
             if args.len() != 1 {
                 return Err(unsupported());
             }
             let x = go(g, &args[0], depth + 1, budget)?;
             let root = g.intern(Node::Call(
-                if f == "Determinant" {
-                    "det"
-                } else if f == "Transpose" {
-                    "transpose"
-                } else {
-                    "inverse"
+                match f {
+                    "Determinant" => "det",
+                    "Transpose" => "transpose",
+                    "Trace" => "trace",
+                    "Rank" => "rank",
+                    _ => "inverse",
                 }
                 .into(),
                 x,
@@ -351,6 +371,26 @@ pub fn encode(g: &Graph, root: Id) -> Result<Value> {
             }
             Node::Symbol(s) if user_symbol(s) => json!(s),
             Node::Constant(s) => json!(if s == "pi" { "Pi" } else { "ExponentialE" }),
+            Node::Pow(base, exponent)
+                if matches!(structured::shape(g, *base)?, structured::Shape::Matrix(..)) =>
+            {
+                // LaTeX lowers unary minus to multiplication by -1.
+                let exponent = match &g.nodes[*exponent] {
+                    Node::Mul(sign, number)
+                        if matches!(&g.nodes[*sign], Node::Number(n) if n == "-1")
+                            && matches!(&g.nodes[*number], Node::Number(n) if n.bytes().all(|b| b.is_ascii_digit())) =>
+                    {
+                        json!({"num": format!("-{}", g.text(*number))})
+                    }
+                    _ => go(g, *exponent, depth + 1, budget)?,
+                };
+                let base = go(g, *base, depth + 1, budget)?;
+                if exponent.get("num").and_then(Value::as_str) == Some("-1") {
+                    json!(["Inverse", base])
+                } else {
+                    json!(["Power", base, exponent])
+                }
+            }
             Node::Add(x, y)
             | Node::Sub(x, y)
             | Node::Mul(x, y)
@@ -380,6 +420,13 @@ pub fn encode(g: &Graph, root: Id) -> Result<Value> {
                     go(g, *y, depth + 1, budget)?
                 ])
             }
+            Node::Apply(name, args) => {
+                let mut application = vec![json!("Apply"), json!({"sym": name})];
+                for arg in args {
+                    application.push(go(g, *arg, depth + 1, budget)?);
+                }
+                Value::Array(application)
+            }
             Node::Call(f, x) => {
                 let f = match f.as_str() {
                     "sin" => "Sin",
@@ -391,6 +438,8 @@ pub fn encode(g: &Graph, root: Id) -> Result<Value> {
                     "floor" => "Floor",
                     "ceil" => "Ceil",
                     "det" => "Determinant",
+                    "trace" => "Trace",
+                    "rank" => "Rank",
                     "transpose" => "Transpose",
                     "inverse" => "Inverse",
                     _ => return Err(unsupported()),

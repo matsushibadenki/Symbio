@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CD xmlns="http://www.openmath.org/OpenMathCD">
+  <CDName>symbio_linalg1</CDName>
+  <CDBase>urn:symbio:cd</CDBase>
+  <CDURL>urn:symbio:cd/symbio_linalg1</CDURL>
+  <CDDate>2026-11-19</CDDate>
+  <CDStatus>experimental</CDStatus>
+  <CDVersion>1</CDVersion>
+  <CDRevision>0</CDRevision>
+  <Description>Symbio extension for matrix operators.</Description>
+  <CDDefinition>
+    <Name>trace</Name>
+    <Role>application</Role>
+    <Description>Unary function on a nonempty square matrix. Its value is the sum of the principal diagonal entries.</Description>
+  </CDDefinition>
+</CD>

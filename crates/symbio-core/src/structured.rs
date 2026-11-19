@@ -119,8 +119,9 @@ pub fn shape(g: &Graph, root: Id) -> Result<Shape> {
             Node::Call(f, _) => match (f.as_str(), shapes[0]) {
                 ("transpose", Shape::Matrix(r, c)) => Shape::Matrix(c, r),
                 ("inverse", Shape::Matrix(r, c)) if r == c => Shape::Matrix(r, c),
-                ("det", Shape::Matrix(r, c)) if r == c => Shape::Scalar,
-                ("inverse" | "transpose" | "det", _) => {
+                ("det" | "trace", Shape::Matrix(r, c)) if r == c => Shape::Scalar,
+                ("rank", Shape::Matrix(..)) => Shape::Scalar,
+                ("inverse" | "transpose" | "det" | "trace" | "rank", _) => {
                     return Err(Error::Domain(
                         "matrix operator requires a compatible matrix".into(),
                     ));
@@ -150,6 +151,7 @@ pub fn rebuild(n: &Node, c: &[Id]) -> Node {
         Node::Pow(..) => Node::Pow(c[0], c[1]),
         Node::Equation(..) => Node::Equation(c[0], c[1]),
         Node::Call(f, _) => Node::Call(f.clone(), c[0]),
+        Node::Apply(name, _) => Node::Apply(name.clone(), c.to_vec()),
         Node::Matrix { rows, cols, .. } => Node::Matrix {
             rows: *rows,
             cols: *cols,
@@ -691,8 +693,15 @@ pub fn matrix_call(g: &mut Graph, f: &str, id: Id, a: &Assumptions) -> Result<Id
             entries: out,
         });
     }
-    if rows != cols {
+    if f != "rank" && rows != cols {
         return Err(Error::Domain("square matrix required".into()));
+    }
+    if f == "trace" {
+        let mut trace = entries[0];
+        for i in 1..rows {
+            trace = g.intern(Node::Add(trace, entries[i * cols + i]))?;
+        }
+        return algebra::simplify(g, trace, a);
     }
     if f == "det" && rows <= 2 {
         if rows == 1 {
@@ -711,6 +720,26 @@ pub fn matrix_call(g: &mut Graph, f: &str, id: Id, a: &Assumptions) -> Result<Id
             })
         })
         .collect::<Result<Vec<_>>>()?;
+    if f == "rank" {
+        let mut rank = 0;
+        for col in 0..cols {
+            let Some(pivot) = (rank..rows).find(|row| !values[row * cols + col].is_zero()) else {
+                continue;
+            };
+            for j in col..cols {
+                values.swap(rank * cols + j, pivot * cols + j);
+            }
+            for row in rank + 1..rows {
+                let factor = &values[row * cols + col] / &values[rank * cols + col];
+                for j in col..cols {
+                    let term = &factor * &values[rank * cols + j];
+                    values[row * cols + j] -= term;
+                }
+            }
+            rank += 1;
+        }
+        return g.number(rank as i64);
+    }
     let mut inverse = vec![Rational::zero(); rows * rows];
     for i in 0..rows {
         inverse[i * rows + i] = Rational::one();

@@ -23,6 +23,8 @@ Mappings follow the [OpenMath XML standard](https://openmath.org/standard/om20-2
 | `OMV name` | A supported ASCII scalar symbol |
 | `nums1.rational`, `nums1.pi`, `nums1.e` | Exact rational constructor and named constants |
 | `arith1.plus`, `minus`, `times`, `divide`, `power`, `unary_minus`, `abs` | Scalar arithmetic |
+| `arith1.plus`, `arith1.minus` with matrix operands | Entrywise addition and subtraction of equal-shaped matrices |
+| [`arith1.times`](https://openmath.org/cd/arith1.html#times) | Ordered matrix products and scalar multiplication of matrices. Matrix dimensions are checked before evaluation. |
 | `arith1.root(expression, 2)` | Principal square root |
 | `transc1.sin`, `cos`, `exp`, `ln` | Supported unary functions; `ln` is natural logarithm |
 | `rounding1.floor`, `ceiling` | Existing floor/ceiling operators |
@@ -31,12 +33,17 @@ Mappings follow the [OpenMath XML standard](https://openmath.org/standard/om20-2
 | `calculus1.defint(oriented_interval(a, b), lambda(x, body))` | Definite integral with ordered start/end values |
 | `arith1.sum` / `product` over `interval1.integer_interval(a, b)` and a unary lambda | Inclusive finite sum/product |
 | `linalg1.determinant` | Exact determinant of a square matrix |
+| `arith1.divide(matrix, scalar)` | Exact entrywise division by a scalar. A zero divisor retains the definition and reports a domain error. |
+| `arith1.power(matrix, -1)` | Inverse of a square matrix, exchanged as MathJSON `Inverse`. Singular matrices retain the definition and report a domain error. |
+| `arith1.power(matrix, exponent)` | Powers of square matrices. The kernel evaluates integer exponents from −16 to 16, including zero. |
+| `linalg4.rank` | Exact rank of a rectangular matrix with rational entries |
+| `symbio_linalg1.trace` | Sum of the diagonal entries of a square matrix. Requires the [Symbio dictionary](openmath-cd/symbio_linalg1.ocd) and its explicit `urn:symbio:cd` base. |
 | `linalg1.transpose` | Transpose of a rectangular matrix |
 | `linalg3.matrix` with `matrixcolumn` children | Column-oriented input converted to the same row-oriented SEG matrix |
 | `relation1.eq` | Binary equality |
 | `linalg2.matrix` containing `linalg2.matrixrow` | Row-oriented rectangular matrix constructor, up to 8×8 |
 
-See [arith1](https://openmath.org/cd/arith1.html), [nums1](https://openmath.org/cd/nums1.html), [transc1](https://openmath.org/cd/transc1.html), [rounding1](https://openmath.org/cd/rounding1.html) and [linalg2](https://openmath.org/cd/linalg2.html). Matrix entries must be scalar. Matrix equality, determinant and transpose are supported; other matrix arithmetic remains outside this phrasebook. The matrix operators follow [linalg1](https://openmath.org/cd/linalg1.html); vector transpose is not supported. Operators survive exchange as authored SEG calls, not just evaluated entries. `plus`/`times` require 2–128 operands; the other supported operators have fixed arity. General nth roots are not mapped to square roots.
+See [arith1](https://openmath.org/cd/arith1.html), [nums1](https://openmath.org/cd/nums1.html), [transc1](https://openmath.org/cd/transc1.html), [rounding1](https://openmath.org/cd/rounding1.html) and [linalg2](https://openmath.org/cd/linalg2.html). Matrix entries must be scalar. Matrix equality and the matrix operations listed above use the kernel’s existing shape checks. Powers with exponents outside the evaluation range retain the authored expression and report a calculation error. The matrix operators follow [linalg1](https://openmath.org/cd/linalg1.html); vector transpose is not supported. Operators survive exchange as authored SEG calls, not just evaluated entries. `plus`/`times` require 2–128 operands; the other supported operators have fixed arity. General nth roots are not mapped to square roots.
 
 The accepted namespace is `http://www.openmath.org/OpenMath`; default namespaces and bound prefixes both work. Root `version` may be omitted or `2.0`. An optional root or symbol `cdbase` may explicitly identify `http://www.openmath.org/cd`. Other inherited dictionary bases are rejected rather than interpreting a foreign symbol as an official one. The context extension below has its own explicit base. Namespace shadowing cannot change a foreign element into a supported object merely by sharing its local name.
 
@@ -72,10 +79,31 @@ Source spelling, negative-number syntax and `e` versus `exp(1)` may normalize th
 
 Input/output are bounded to 1 MiB, XML stack depth to at most 49 elements, and element count to 4096. Existing exact conversion budgets, 8×8 matrices, source-length limit of 2048 UTF-8 bytes and parser/graph/algorithm bounds also apply. Integer literals accept decimal digits with an optional sign and surrounding whitespace, with a 4096-digit parsing bound before the stricter source limit. Output uses UTF-8 XML 1.0 and XML escaping; supported character references are decoded once.
 
-DTD, external entities, processing instructions, CDATA, `OMR` references, `OMFOREIGN`, approximate `OMF`, nondecimal integer encodings, arbitrary function heads/dictionaries, unknown attributes, vector objects, general/standalone function binders, solution sets and other matrix arithmetic are rejected. No XML-related file/network lookup, TeX execution or external CAS is performed. Root/object sharing IDs and `xml:base` are not accepted. XML declarations, comments and formatting whitespace do not carry instructions to the application.
+DTD, external entities, processing instructions, CDATA, `OMR` references, `OMFOREIGN`, approximate `OMF`, nondecimal integer encodings, unknown dictionaries and unsupported function heads, unknown attributes, vector objects, general/standalone function binders, solution sets and other matrix arithmetic are rejected. No XML-related file/network lookup, TeX execution or external CAS is performed. Root/object sharing IDs and `xml:base` are not accepted. XML declarations, comments and formatting whitespace do not carry instructions to the application.
 
-`python3 scripts/smoke-openmath.py` exercises real CLI/XML roundtrips, exact large rationals, context retention, immutable sources, no-clobber writes and DTD rejection. Core tests also cover namespace resolution/shadowing, unknown semantic data, resource limits, equations, matrices, calculus binding/scope, arbitrary-constant conditions and domain errors. Third-party CAS import/export and full OpenMath schema/ecosystem conformance remain unverified; only the documented phrasebook is claimed.
+`python3 scripts/smoke-openmath.py` exercises real CLI/XML roundtrips, exact large rationals, context retention, immutable sources, no-clobber writes and DTD rejection. Core tests also cover namespace resolution/shadowing, unknown semantic data, resource limits, equations, matrices, calculus binding/scope, arbitrary-constant conditions and domain errors. The external codec roundtrip below covers the documented cases. The optional SymPy comparison below evaluates the matrix fixtures.
 
 ## Column-oriented matrix input
 
 The experimental [linalg3 dictionary](https://openmath.org/cd/linalg3.html) describes matrices as columns. Symbio accepts nonempty rectangular matrices built from its matrixcolumn constructor, preserving entry order and shape during conversion to SEG. The existing 8×8 bound applies. Export uses the supported linalg2 row representation. Mixed row/column constructors, empty columns, ragged columns and standalone vectors are rejected. Existing determinant and transpose operators can wrap either supported matrix representation. Third-party application exchange has not been tested.
+
+Named symbolic calls use an `OMA` headed by an `OMV`, with up to 32 ordered scalar arguments. Nested calls and zero-argument calls are supported. MathJSON uses `["Apply", {"sym":"f"}, "x"]` for a named call. Names follow the notebook ASCII identifier rules. Calls are retained as symbolic expressions for exchange.
+
+## External codec interoperability
+
+`scripts/check-openmath-interop.py` exercises 16 cases through [py-openmath 0.3.0](https://github.com/OpenMath/py-openmath). It compares the authored MathJSON expression and context before and after Symbio XML export, external decoding and encoding, and Symbio reimport. Expected exact matrix results and domain errors are checked in Symbio. The application test also compares the function names, ordered arguments and nesting against the original MathJSON. py-openmath provides the independent XML codec. Symbio performs the evaluation.
+
+```sh
+python3 -m venv /tmp/symbio-openmath-venv
+/tmp/symbio-openmath-venv/bin/python -m pip install openmath==0.3.0
+/tmp/symbio-openmath-venv/bin/python scripts/check-openmath-interop.py
+```
+
+## External CAS comparison
+
+Run the same check with `--sympy` after installing `sympy==1.14.0` in the test environment. The test translates the OpenMath objects decoded by py-openmath into SymPy integers, rationals and matrices. Both CAS engines evaluate the same serialized expression. Thirteen successful matrix cases matched exactly, including the matrix product, inverse, exponent −2 scalar division by 3, rational trace, and rectangular, rank-deficient and zero-matrix ranks. For the two failure cases, SymPy raised `NonInvertibleMatrixError` on the singular inverse and returned non-finite matrix entries on zero division. Symbio reported `domain_error` with no result in both cases.
+
+```sh
+/tmp/symbio-openmath-venv/bin/python -m pip install sympy==1.14.0
+/tmp/symbio-openmath-venv/bin/python scripts/check-openmath-interop.py --sympy
+```

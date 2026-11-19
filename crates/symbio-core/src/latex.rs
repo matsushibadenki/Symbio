@@ -13,6 +13,7 @@ enum Token {
     Approximate(String, Option<u32>),
     Symbol(String),
     Reference(String),
+    Apply(String),
     Command(String),
     Op(char),
     Row,
@@ -133,7 +134,8 @@ pub fn parse(graph: &mut Graph, source: &str) -> Result<Id> {
                         i += 1;
                         Token::Reference(name)
                     }
-                    "mathit" => {
+                    "mathit" | "symbioapply" => {
+                        let name_command = name == "symbioapply";
                         if chars.get(i) != Some(&'{') {
                             return Err(Error::Parse(i));
                         }
@@ -147,7 +149,11 @@ pub fn parse(graph: &mut Graph, source: &str) -> Result<Id> {
                             return Err(Error::Parse(i));
                         }
                         i += 1;
-                        Token::Symbol(name)
+                        if name_command {
+                            Token::Apply(name)
+                        } else {
+                            Token::Symbol(name)
+                        }
                     }
                     "mathrm" => {
                         if chars.get(i..i + 3) == Some(&['{', 'd', '}']) {
@@ -162,8 +168,8 @@ pub fn parse(graph: &mut Graph, source: &str) -> Result<Id> {
                     "partial" => Token::Symbol("d".into()),
                     "pi" => Token::Command("pi".into()),
                     "top" => Token::Symbol("T".into()),
-                    "int" | "sum" | "prod" | "begin" | "end" | "det" | "lfloor" | "rfloor"
-                    | "lceil" | "rceil" => Token::Command(name),
+                    "int" | "sum" | "prod" | "begin" | "end" | "trace" | "rank" | "det"
+                    | "lfloor" | "rfloor" | "lceil" | "rceil" => Token::Command(name),
                     "cdot" | "times" => Token::Op('*'),
                     "div" => Token::Op('/'),
                     "frac" | "dfrac" | "tfrac" | "sqrt" | "sin" | "cos" | "exp" | "ln" | "log"
@@ -182,7 +188,7 @@ pub fn parse(graph: &mut Graph, source: &str) -> Result<Id> {
                 Token::Number(chars[start..i].iter().collect())
             }
             c if c.is_ascii_alphabetic() => Token::Symbol(c.to_string()),
-            c if "+-*/^(){}[]|_=&".contains(c) => Token::Op(c),
+            c if "+-*/^(){}[]|_=&,".contains(c) => Token::Op(c),
             '−' => Token::Op('-'),
             '×' | '·' => Token::Op('*'),
             _ => return Err(Error::Parse(i - 1)),
@@ -260,6 +266,26 @@ impl Parser<'_> {
             Token::Approximate(decimal, precision) => {
                 self.graph.intern(Node::Approximate { decimal, precision })
             }
+            Token::Apply(name) => {
+                self.expect(Token::Op('{'))?;
+                self.level += 1;
+                let mut args = Vec::new();
+                if self.peek() != &Token::Op('}') {
+                    loop {
+                        if args.len() == 32 {
+                            return Err(Error::Limit);
+                        }
+                        args.push(self.expression(0, depth + 1)?);
+                        if self.peek() != &Token::Op(',') {
+                            break;
+                        }
+                        self.take();
+                    }
+                }
+                self.expect(Token::Op('}'))?;
+                self.level -= 1;
+                self.graph.intern(Node::Apply(name, args))
+            }
             Token::Number(s) => parser::parse(self.graph, &s),
             Token::Reference(s) => self.graph.intern(Node::Reference(s)),
             Token::Symbol(mut s) => {
@@ -333,7 +359,7 @@ impl Parser<'_> {
                     let a = self.group(depth)?;
                     self.graph.intern(Node::Call("sqrt".into(), a))
                 }
-                "sin" | "cos" | "exp" | "ln" | "log" | "det" => {
+                "sin" | "cos" | "exp" | "ln" | "log" | "det" | "trace" | "rank" => {
                     let power = if self.peek() == &Token::Op('^') {
                         self.take();
                         Some(self.exponent(depth)?)
@@ -532,7 +558,8 @@ impl Parser<'_> {
                 Token::Op('*') => ('*', 3, 4, false),
                 Token::Op('/') => ('/', 3, 4, false),
                 Token::Op('^') => ('^', 7, 6, false),
-                Token::Approximate(..)
+                Token::Apply(_)
+                | Token::Approximate(..)
                 | Token::Number(_)
                 | Token::Symbol(_)
                 | Token::Reference(_)
@@ -687,6 +714,13 @@ fn tex(g: &Graph, id: Id, depth: usize) -> Result<String> {
         Node::Mul(a, b) => format!(r"\left({}\cdot {}\right)", f(*a)?, f(*b)?),
         Node::Div(a, b) => format!(r"\frac{{{}}}{{{}}}", f(*a)?, f(*b)?),
         Node::Pow(a, b) => format!(r"\left({}\right)^{{{}}}", f(*a)?, f(*b)?),
+        Node::Apply(name, args) => format!(
+            r"\symbioapply{{{name}}}{{{}}}",
+            args.iter()
+                .map(|arg| f(*arg))
+                .collect::<Result<Vec<_>>>()?
+                .join(",")
+        ),
         Node::Call(name, a) => match name.as_str() {
             "sqrt" => format!(r"\sqrt{{{}}}", f(*a)?),
             "abs" => format!(r"\left|{}\right|", f(*a)?),
