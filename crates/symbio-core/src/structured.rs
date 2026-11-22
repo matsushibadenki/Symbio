@@ -116,12 +116,59 @@ pub fn shape(g: &Graph, root: Id) -> Result<Shape> {
                     }
                 }
             }
+            Node::MatrixTensor(..) | Node::VectorTensor(..) => {
+                let (mut rows, mut cols) = (1, 1);
+                for operand in shapes {
+                    let Shape::Matrix(height, width) = operand else {
+                        return Err(Error::Domain(
+                            "matrix tensor requires matrix operands".into(),
+                        ));
+                    };
+                    if matches!(n, Node::VectorTensor(..)) && height != 1 {
+                        return Err(Error::Domain("vector tensor requires row vectors".into()));
+                    }
+                    rows *= height;
+                    cols *= width;
+                    if rows > 8 || cols > 8 {
+                        return Err(Error::Limit);
+                    }
+                }
+                Shape::Matrix(rows, cols)
+            }
+            Node::OuterProduct(left, right) => {
+                scalar()?;
+                if !(1..=8).contains(&left.len()) || !(1..=8).contains(&right.len()) {
+                    return Err(Error::Domain(
+                        "outer product requires vectors of length 1–8".into(),
+                    ));
+                }
+                Shape::Matrix(left.len(), right.len())
+            }
+            Node::VectorProduct(..) => {
+                scalar()?;
+                Shape::Matrix(1, 3)
+            }
+            Node::MatrixSelector(..) => match shapes.as_slice() {
+                [Shape::Scalar, Shape::Scalar, Shape::Matrix(..)] => Shape::Scalar,
+                _ => {
+                    return Err(Error::Domain(
+                        "matrix selector requires two indices and a matrix".into(),
+                    ));
+                }
+            },
+            Node::Call(f, order) if f == "identity" => {
+                let order = identity_order(g, *order)?;
+                Shape::Matrix(order, order)
+            }
             Node::Call(f, _) => match (f.as_str(), shapes[0]) {
                 ("transpose", Shape::Matrix(r, c)) => Shape::Matrix(c, r),
                 ("inverse", Shape::Matrix(r, c)) if r == c => Shape::Matrix(r, c),
                 ("det" | "trace", Shape::Matrix(r, c)) if r == c => Shape::Scalar,
-                ("rank", Shape::Matrix(..)) => Shape::Scalar,
-                ("inverse" | "transpose" | "det" | "trace" | "rank", _) => {
+                ("rank" | "rowcount" | "columncount", Shape::Matrix(..)) => Shape::Scalar,
+                (
+                    "inverse" | "transpose" | "det" | "trace" | "rank" | "rowcount" | "columncount",
+                    _,
+                ) => {
                     return Err(Error::Domain(
                         "matrix operator requires a compatible matrix".into(),
                     ));
@@ -151,6 +198,22 @@ pub fn rebuild(n: &Node, c: &[Id]) -> Node {
         Node::Pow(..) => Node::Pow(c[0], c[1]),
         Node::Equation(..) => Node::Equation(c[0], c[1]),
         Node::Call(f, _) => Node::Call(f.clone(), c[0]),
+        Node::MatrixTensor(..) => Node::MatrixTensor(c.to_vec()),
+        Node::VectorTensor(..) => Node::VectorTensor(c.to_vec()),
+        Node::OuterProduct(left, _) => {
+            let (left, right) = c.split_at(left.len());
+            Node::OuterProduct(left.to_vec(), right.to_vec())
+        }
+        Node::VectorProduct(left, _) => {
+            let (left, right) = c.split_at(left.len());
+            Node::VectorProduct(left.to_vec(), right.to_vec())
+        }
+        Node::ScalarProduct(left, _) => {
+            let (left, right) = c.split_at(left.len());
+            Node::ScalarProduct(left.to_vec(), right.to_vec())
+        }
+        Node::VectorSelector(..) => Node::VectorSelector(c[0], c[1..].to_vec()),
+        Node::MatrixSelector(..) => Node::MatrixSelector([c[0], c[1], c[2]]),
         Node::Apply(name, _) => Node::Apply(name.clone(), c.to_vec()),
         Node::Matrix { rows, cols, .. } => Node::Matrix {
             rows: *rows,
@@ -671,6 +734,14 @@ pub fn matrix_binary(g: &mut Graph, n: &Node, x: Id, y: Id, a: &Assumptions) -> 
     Ok(Some(result))
 }
 
+pub(crate) fn identity_order(g: &Graph, order: Id) -> Result<usize> {
+    g.value(order)
+        .filter(|value| value.is_integer())
+        .and_then(|value| value.to_usize())
+        .filter(|order| (1..=8).contains(order))
+        .ok_or_else(|| Error::Domain("identity order must be an integer from 1 to 8".into()))
+}
+
 pub fn matrix_call(g: &mut Graph, f: &str, id: Id, a: &Assumptions) -> Result<Id> {
     let Node::Matrix {
         rows,
@@ -692,6 +763,11 @@ pub fn matrix_call(g: &mut Graph, f: &str, id: Id, a: &Assumptions) -> Result<Id
             cols: rows,
             entries: out,
         });
+    }
+    match f {
+        "rowcount" => return g.number(rows as i64),
+        "columncount" => return g.number(cols as i64),
+        _ => {}
     }
     if f != "rank" && rows != cols {
         return Err(Error::Domain("square matrix required".into()));

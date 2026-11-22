@@ -63,6 +63,15 @@
 - 🟢 [Done] 外部のOpenMath実装py-openmath 0.3.0でXMLを再出力し、Symbioへ再読込。行列演算の原式・厳密結果・定義域エラーと、一般関数の名前・引数順・入れ子を12ケースで照合。
 - 🟢 [Done] py-openmathで復号したOpenMathをSymPy 1.14.0で評価し、積・逆行列・累乗・スカラー除算を含む9件の厳密結果と、特異行列・ゼロ除算の扱いをSymbioと比較。
 - 🟢 [Done] トレースと階数をMathJSON／OpenMathで相互交換。SymPyと有理数トレース、長方形・階数落ち・ゼロ行列の階数を厳密比較。
+- 🟢 [Done] OpenMath／MathJSONで行列の行数と列数を交換。転置を含む原式を保ち、長方形行列の結果をSymPyと照合。
+- 🟢 [Done] OpenMath／MathJSONで行列要素を1始まりの行・列番号で選択。原式の往復、有理数の厳密結果、範囲外エラーをSymPyとの比較で検証。
+- 🟢 [Done] OpenMathの vector_selector とMathJSONのVectorSelectorを往復変換。明示ベクトルの1始まりの選択、有理数の厳密結果、範囲外エラーをSymPyと照合。
+- 🟢 [Done] OpenMathの scalarproduct とMathJSONのScalarProductを往復変換。有理数の厳密な内積、引数順、長さ不一致エラーをSymPyと照合。
+- 🟢 [Done] OpenMathの vectorproduct とMathJSONのVectorProductを往復変換。有理数の外積、引数交換での符号反転、3次元以外のエラーをSymPyと照合。
+- 🟢 [Done] OpenMathの outerproduct とMathJSONのOuterProductを往復変換。異なる長さのベクトル、有理数の厳密結果、引数交換と転置の一致をSymPyと照合。
+- 🟢 [Done] OpenMathの matrix_tensor とMathJSONのMatrixTensorを往復変換。異なる形状、引数交換、3因子の形状と全有理数成分をSymPyと照合。
+- 🟢 [Done] OpenMathの vector_tensor とMathJSONのVectorTensorを往復変換。異なる長さ、引数交換、3因子の厳密な全成分をSymPyと照合。
+- 🟢 [Done] OpenMathの linalg5.identity とMathJSONのIdentityMatrixを往復変換。次数の保持、形状・全成分のSymPy照合、不正な次数の拒否を検証。
 - 🟠 [Next] OpenMathの残る行列演算・追加辞書と外部CAS検証の拡充。標準ライブラリ全体の対応は未完了。
 - 🔴 [Later] 開いている全文書のセッション復元・一括保存・クラッシュ回復。
 

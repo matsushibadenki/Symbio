@@ -36,8 +36,17 @@ Mappings follow the [OpenMath XML standard](https://openmath.org/standard/om20-2
 | `arith1.divide(matrix, scalar)` | Exact entrywise division by a scalar. A zero divisor retains the definition and reports a domain error. |
 | `arith1.power(matrix, -1)` | Inverse of a square matrix, exchanged as MathJSON `Inverse`. Singular matrices retain the definition and report a domain error. |
 | `arith1.power(matrix, exponent)` | Powers of square matrices. The kernel evaluates integer exponents from −16 to 16, including zero. |
+| `linalg4.rowcount`, `linalg4.columncount` | Exact row and column counts of a matrix |
 | `linalg4.rank` | Exact rank of a rectangular matrix with rational entries |
 | `symbio_linalg1.trace` | Sum of the diagonal entries of a square matrix. Requires the [Symbio dictionary](openmath-cd/symbio_linalg1.ocd) and its explicit `urn:symbio:cd` base. |
+| `linalg5.identity(n)` | Exact square identity matrix of order 1–8. Invalid orders produce a domain error at import. |
+| `linalg6.vector_tensor` | Ordered Kronecker product of 2–32 explicit row vectors. The result is displayed as a single row of up to 8 entries. |
+| `linalg6.matrix_tensor` | Ordered matrix Kronecker product using SymPy block order. Accepts 2–32 operands, with each result dimension limited to 8. |
+| `linalg1.outerproduct(left, right)` | Matrix with entries `left[i] * right[j]`. Explicit vector lengths may differ and each must be 1–8. |
+| `linalg1.vectorproduct(left, right)` | Ordered cross product of two explicit three-component `linalg2.vector` operands. Symbio displays the result as a 1×3 row. |
+| `linalg1.scalarproduct(left, right)` | Dot product of two equal-length explicit `linalg2.vector` operands, up to 32 scalar entries each. Different lengths produce a domain error. |
+| `linalg1.vector_selector(index, vector)` | Exact entry from an explicit `linalg2.vector` with up to 32 scalar entries, using a one-based integer index |
+| `linalg1.matrix_selector(row, column, matrix)` | Exact matrix entry at one-based integer indices. Out-of-range indices report a domain error. |
 | `linalg1.transpose` | Transpose of a rectangular matrix |
 | `linalg3.matrix` with `matrixcolumn` children | Column-oriented input converted to the same row-oriented SEG matrix |
 | `relation1.eq` | Binary equality |
@@ -79,7 +88,7 @@ Source spelling, negative-number syntax and `e` versus `exp(1)` may normalize th
 
 Input/output are bounded to 1 MiB, XML stack depth to at most 49 elements, and element count to 4096. Existing exact conversion budgets, 8×8 matrices, source-length limit of 2048 UTF-8 bytes and parser/graph/algorithm bounds also apply. Integer literals accept decimal digits with an optional sign and surrounding whitespace, with a 4096-digit parsing bound before the stricter source limit. Output uses UTF-8 XML 1.0 and XML escaping; supported character references are decoded once.
 
-DTD, external entities, processing instructions, CDATA, `OMR` references, `OMFOREIGN`, approximate `OMF`, nondecimal integer encodings, unknown dictionaries and unsupported function heads, unknown attributes, vector objects, general/standalone function binders, solution sets and other matrix arithmetic are rejected. No XML-related file/network lookup, TeX execution or external CAS is performed. Root/object sharing IDs and `xml:base` are not accepted. XML declarations, comments and formatting whitespace do not carry instructions to the application.
+DTD, external entities, processing instructions, CDATA, `OMR` references, `OMFOREIGN`, approximate `OMF`, nondecimal integer encodings, unknown dictionaries and unsupported function heads, unknown attributes, standalone vector objects, general/standalone function binders, solution sets and other matrix arithmetic are rejected. No XML-related file/network lookup, TeX execution or external CAS is performed. Root/object sharing IDs and `xml:base` are not accepted. XML declarations, comments and formatting whitespace do not carry instructions to the application.
 
 `python3 scripts/smoke-openmath.py` exercises real CLI/XML roundtrips, exact large rationals, context retention, immutable sources, no-clobber writes and DTD rejection. Core tests also cover namespace resolution/shadowing, unknown semantic data, resource limits, equations, matrices, calculus binding/scope, arbitrary-constant conditions and domain errors. The external codec roundtrip below covers the documented cases. The optional SymPy comparison below evaluates the matrix fixtures.
 
@@ -91,19 +100,29 @@ Named symbolic calls use an `OMA` headed by an `OMV`, with up to 32 ordered scal
 
 ## External codec interoperability
 
-`scripts/check-openmath-interop.py` exercises 16 cases through [py-openmath 0.3.0](https://github.com/OpenMath/py-openmath). It compares the authored MathJSON expression and context before and after Symbio XML export, external decoding and encoding, and Symbio reimport. Expected exact matrix results and domain errors are checked in Symbio. The application test also compares the function names, ordered arguments and nesting against the original MathJSON. py-openmath provides the independent XML codec. Symbio performs the evaluation.
+`scripts/check-openmath-interop.py` exercises 39 cases through [py-openmath 0.3.0](https://github.com/OpenMath/py-openmath). It compares the authored MathJSON expression and context before and after Symbio XML export, external decoding and encoding, and Symbio reimport. Expected exact matrix results and domain errors are checked in Symbio. The application test also compares the function names, ordered arguments and nesting against the original MathJSON. py-openmath provides the independent XML codec. Symbio performs the evaluation.
 
 ```sh
 python3 -m venv /tmp/symbio-openmath-venv
-/tmp/symbio-openmath-venv/bin/python -m pip install openmath==0.3.0
+/tmp/symbio-openmath-venv/bin/python -m pip install "setuptools<81" openmath==0.3.0
 /tmp/symbio-openmath-venv/bin/python scripts/check-openmath-interop.py
 ```
 
 ## External CAS comparison
 
-Run the same check with `--sympy` after installing `sympy==1.14.0` in the test environment. The test translates the OpenMath objects decoded by py-openmath into SymPy integers, rationals and matrices. Both CAS engines evaluate the same serialized expression. Thirteen successful matrix cases matched exactly, including the matrix product, inverse, exponent −2 scalar division by 3, rational trace, and rectangular, rank-deficient and zero-matrix ranks. For the two failure cases, SymPy raised `NonInvertibleMatrixError` on the singular inverse and returned non-finite matrix entries on zero division. Symbio reported `domain_error` with no result in both cases.
+Run the same check with `--sympy` after installing `sympy==1.14.0` in the test environment. The test translates the OpenMath objects decoded by py-openmath into SymPy integers, rationals and matrices. Both CAS engines evaluate the same serialized expression. Thirty-one successful linear algebra cases matched exactly, including the matrix product, inverse, exponent −2 scalar division by 3, rational trace, and rectangular, rank-deficient and zero-matrix ranks. For singularity and zero division, SymPy raised `NonInvertibleMatrixError` on the singular inverse and returned non-finite matrix entries on zero division. Symbio reported `domain_error` with no result in both cases. For indices beyond the last row or column, SymPy raised `IndexError` and Symbio reported `domain_error`.
 
 ```sh
 /tmp/symbio-openmath-venv/bin/python -m pip install sympy==1.14.0
 /tmp/symbio-openmath-venv/bin/python scripts/check-openmath-interop.py --sympy
 ```
+
+The scalar product fixture compares an exact rational result of `7/2`. With different vector lengths, SymPy returns `ShapeError` and Symbio returns `domain_error`.
+
+The cross product fixtures compare both operand orders with SymPy, using rational components. The two results have opposite signs in every component. A non-three-dimensional operand yields `domain_error` in Symbio.
+
+The outer product fixtures compare a 2×3 rational result, its transpose, and the 3×2 result obtained by swapping operands with SymPy.
+
+For `linalg6.matrix_tensor(A, B)`, Symbio uses the block convention in which block `(i, j)` is `A[i, j] * B`. The fixtures compare both operand orders and a three-factor product with SymPy.
+
+The vector tensor fixtures compare both orders of a two-entry and a three-entry vector plus a three-factor product. The checks compare every exact component and the full result length.

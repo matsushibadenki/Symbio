@@ -69,3 +69,21 @@ Approximate literals use the editable notebook notation `\symbioapprox{1.2300:5}
 Named symbolic applications can be exchanged as `["Apply", {"sym":"f"}, "x"]`. The explicit symbol identifies the function and the remaining entries are its ordered scalar arguments. Nested applications are supported.
 
 `Trace` takes one square matrix and sums its diagonal entries. `Rank` takes one rectangular matrix and evaluates the rank by exact rational elimination when its entries reduce to rationals. Both operator heads survive OpenMath exchange.
+
+`RowCount` and `ColumnCount` each take one matrix expression and return its row or column count as an exact integer. Exchange preserves the operation and its operand, including nested expressions such as `Transpose`.
+
+`["MatrixSelector", row, column, matrix]` selects a matrix entry using one-based integer indices. The exchange preserves both indices and the matrix expression. Invalid indices produce a domain error.
+
+`["VectorSelector", index, ["Vector", ...entries]]` selects a scalar entry from an explicit vector of up to 32 entries. Indices are one-based integers. OpenMath exchange preserves the selector, index and entries. Invalid indices produce a domain error.
+
+`["ScalarProduct", ["Vector", ...left], ["Vector", ...right]]` computes the sum of pairwise products. OpenMath exchange preserves the operand order and entries. Each explicit vector can contain up to 32 scalar entries. Different lengths produce a domain error.
+
+`["VectorProduct", ["Vector", ...left], ["Vector", ...right]]` preserves the operand order for a three-dimensional cross product. The kernel displays the three result components as a row matrix. Other operand lengths yield a domain error.
+
+`["OuterProduct", ["Vector", ...left], ["Vector", ...right]]` preserves both ordered vectors and produces a matrix whose row count is the left vector length and column count is the right vector length. Each vector must have 1–8 scalar entries.
+
+`["MatrixTensor", A, B, ...]` preserves the ordered operands of a matrix Kronecker product. There must be 2–32 matrix operands, and each resulting dimension must be at most 8.
+
+`["VectorTensor", ["Vector", ...left], ["Vector", ...right], ...]` preserves the ordered explicit vectors in a Kronecker product. It accepts 2–32 nonempty vectors whose lengths multiply to at most 8. The result is displayed as a single row.
+
+`["IdentityMatrix", n]` constructs an exact square identity matrix for an integer literal of order 1–8. OpenMath exchange preserves the constructor and its order. Invalid orders produce a domain error at import.

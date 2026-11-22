@@ -31,6 +31,8 @@ def evaluate_matrix_xml(document, cas):
             raise ValueError(f"Unsupported OpenMath object: {node!r}")
         head = (node.elem.cd, node.elem.name)
         args = [evaluate(arg) for arg in node.arguments]
+        if head == ("linalg2", "vector"):
+            return cas.Matrix(1, len(args), args)
         if head == ("linalg2", "matrixrow"):
             return args
         if head == ("linalg2", "matrix"):
@@ -45,8 +47,18 @@ def evaluate_matrix_xml(document, cas):
             ("arith1", "divide"): lambda a, b: a / b,
             ("arith1", "power"): lambda a, b: a ** b,
             ("linalg1", "transpose"): lambda a: a.T,
+            ("linalg5", "identity"): cas.eye,
+            ("linalg6", "matrix_tensor"): cas.kronecker_product,
+            ("linalg6", "vector_tensor"): cas.kronecker_product,
+            ("linalg1", "outerproduct"): lambda a, b: a.T * b,
+            ("linalg1", "vectorproduct"): lambda a, b: a.cross(b),
+            ("linalg1", "scalarproduct"): lambda a, b: a.dot(b),
+            ("linalg1", "vector_selector"): lambda index, vector: vector[0, int(index) - 1],
+            ("linalg1", "matrix_selector"): lambda row, col, a: a[int(row) - 1, int(col) - 1],
             ("linalg1", "determinant"): lambda a: a.det(),
             ("linalg4", "rank"): lambda a: a.rank(),
+            ("linalg4", "rowcount"): lambda a: a.rows,
+            ("linalg4", "columncount"): lambda a: a.cols,
             ("nums1", "rational"): cas.Rational,
         }
         return operations[head](*args)
@@ -67,7 +79,7 @@ def main():
     args = parser.parse_args()
     if args.sympy:
         import sympy
-        from sympy.matrices.exceptions import NonInvertibleMatrixError
+        from sympy.matrices.exceptions import NonInvertibleMatrixError, ShapeError
 
     subprocess.run(
         ["cargo", "build", "--locked", "--offline", "-p", "symbio-cli"],
@@ -81,7 +93,38 @@ def main():
     function = ["Apply", {"sym": "outer_2"}, "y",
                 ["Apply", {"sym": "inner"}, {"num": "2"}, "x"],
                 ["Apply", {"sym": "constant_fn"}]]
+    cross_left = ["Vector", ["Rational", 1, 2], 2, 3]
+    cross_right = ["Vector", 4, 5, 6]
+    outer_left = ["Vector", ["Rational", 1, 2], 2]
+    outer_right = ["Vector", 3, ["Rational", 2, 3], 6]
+    tensor_left = matrix([["Rational", 1, 2], 2], [3, 4])
+    tensor_right = matrix([3, ["Rational", 1, 3]])
+    vector_left = ["Vector", ["Rational", 1, 2], 2]
+    vector_right = ["Vector", 3, ["Rational", 2, 3], 6]
     cases = [
+        ("identity-one", ["IdentityMatrix", 1], "matrix(1x1; 1)", None),
+        ("identity-three", ["IdentityMatrix", 3], "matrix(3x3; 1, 0, 0, 0, 1, 0, 0, 0, 1)", None),
+        ("vector-tensor", ["VectorTensor", vector_left, vector_right], "matrix(1x6; 3/2, 1/3, 3, 6, 4/3, 12)", None),
+        ("vector-tensor-reversed", ["VectorTensor", vector_right, vector_left], "matrix(1x6; 3/2, 6, 1/3, 4/3, 3, 12)", None),
+        ("vector-tensor-three", ["VectorTensor", vector_left, vector_right, ["Vector", 2]], "matrix(1x6; 3, 2/3, 6, 12, 8/3, 24)", None),
+        ("matrix-tensor", ["MatrixTensor", tensor_left, tensor_right], "matrix(2x4; 3/2, 1/6, 6, 2/3, 9, 1, 12, 4/3)", None),
+        ("matrix-tensor-reversed", ["MatrixTensor", tensor_right, tensor_left], "matrix(2x4; 3/2, 6, 1/6, 2/3, 9, 12, 1, 4/3)", None),
+        ("matrix-tensor-three", ["MatrixTensor", tensor_left, tensor_right, matrix([2])], "matrix(2x4; 3, 1/3, 12, 4/3, 18, 2, 24, 8/3)", None),
+        ("outer-product", ["OuterProduct", outer_left, outer_right], "matrix(2x3; 3/2, 1/3, 3, 6, 4/3, 12)", None),
+        ("outer-product-reversed", ["OuterProduct", outer_right, outer_left], "matrix(3x2; 3/2, 6, 1/3, 4/3, 3, 12)", None),
+        ("outer-product-transpose", ["Transpose", ["OuterProduct", outer_left, outer_right]], "matrix(3x2; 3/2, 6, 1/3, 4/3, 3, 12)", None),
+        ("vector-product", ["VectorProduct", cross_left, cross_right], "matrix(1x3; -3, 9, -11/2)", None),
+        ("vector-product-reversed", ["VectorProduct", cross_right, cross_left], "matrix(1x3; 3, -9, 11/2)", None),
+        ("vector-product-dimension", ["VectorProduct", ["Vector", 1, 2], ["Vector", 3, 4]], None, "domain_error"),
+        ("scalar-product-vectors", ["ScalarProduct", ["Vector", ["Rational", 1, 2], ["Rational", 2, 3]], ["Vector", 3, 3]], "7/2", None),
+        ("scalar-product-mismatch", ["ScalarProduct", ["Vector", 1, 2], ["Vector", 3]], None, "domain_error"),
+        ("vector-selector", ["VectorSelector", 2, ["Vector", 7, ["Rational", 2, 3], 4]], "2/3", None),
+        ("vector-selector-outside", ["VectorSelector", 4, ["Vector", 7, 8, 9]], None, "domain_error"),
+        ("selector", ["MatrixSelector", 2, 1, ["Transpose", matrix([1, ["Rational", 2, 3], 4])]], "2/3", None),
+        ("selector-row-outside", ["MatrixSelector", 2, 1, row], None, "domain_error"),
+        ("selector-column-outside", ["MatrixSelector", 1, 4, row], None, "domain_error"),
+        ("row-count", ["RowCount", ["Transpose", row]], "3", None),
+        ("column-count", ["ColumnCount", ["Transpose", row]], "1", None),
         ("transpose", ["Transpose", row], "matrix(3x1; 1, 2, 3)", None),
         ("trace", ["Trace", matrix([["Rational", 1, 2], 7], [3, ["Rational", 1, 3]])], "5/6", None),
         ("rank-rectangular", ["Rank", matrix([0, 0, 1], [0, ["Rational", 1, 2], 3])], "2", None),
@@ -125,7 +168,7 @@ def main():
             assert restored == json.loads(before.read_text(encoding="utf-8")), name
             if name == "application":
                 assert restored["expression"] == function
-            if name == "trace" or name.startswith("rank-"):
+            if name in {"trace", "row-count", "column-count"} or name.startswith(("rank-", "selector", "vector-selector", "scalar-product-", "vector-product", "outer-product", "matrix-tensor", "vector-tensor", "identity-")):
                 assert restored["expression"][0] == expression[0], name
             cell = snapshot["cells"][0]
             assert cell["result_text"] == result, (name, cell["result_text"])
@@ -135,11 +178,15 @@ def main():
                     cas_result, cas_error = evaluate_matrix_xml(
                         decoder.decode_bytes(external.read_bytes()), sympy
                     )
-                except (NonInvertibleMatrixError, ZeroDivisionError) as exc:
+                except (NonInvertibleMatrixError, ZeroDivisionError, IndexError, ShapeError) as exc:
                     cas_result, cas_error = None, type(exc).__name__
                 assert cas_result == cell["result_text"], (name, cas_result, cell)
-                if name == "singular":
+                if name in {"scalar-product-mismatch", "vector-product-dimension"}:
+                    assert cas_error == "ShapeError", cas_error
+                elif name == "singular":
                     assert cas_error == "NonInvertibleMatrixError", cas_error
+                elif name.startswith("selector-") or name == "vector-selector-outside":
+                    assert cas_error == "IndexError", cas_error
                 elif name == "zero-division":
                     assert cas_error in {"non-finite entries", "ZeroDivisionError"}, cas_error
                 else:
@@ -151,7 +198,7 @@ def main():
 
     print(f"PASS {len(cases)} cases through py-openmath {version('openmath')}")
     if args.sympy:
-        print(f"PASS {len(cases) - 1} matrix cases against SymPy {sympy.__version__}")
+        print(f"PASS {len(cases) - 1} linear algebra cases against SymPy {sympy.__version__}")
 
 
 if __name__ == "__main__":

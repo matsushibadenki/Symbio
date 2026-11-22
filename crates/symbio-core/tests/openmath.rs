@@ -717,3 +717,45 @@ fn named_applications_preserve_argument_order_and_nesting() {
     );
     assert!(import(object(&body.replace("outer_2", "bad-name")).as_bytes()).is_err());
 }
+
+#[test]
+fn matrix_selector_reports_domain_error_for_nonpositive_or_fractional_indices() {
+    use serde_json::json;
+    for index in [json!(0), json!(-1), json!(["Rational", 1, 2])] {
+        let app = from_mathjson(json!(["MatrixSelector", index, 1, ["List", ["List", 7]]]));
+        let xml = export(app.project(), 1).unwrap();
+        let copy = import(&xml).unwrap();
+        let snapshot = copy.snapshot();
+        assert_eq!(
+            snapshot.cells[0].cell.calculation_error.as_deref(),
+            Some("domain_error")
+        );
+        assert!(snapshot.cells[0].result_text.is_none());
+    }
+}
+
+#[test]
+fn identity_rejects_invalid_orders_in_both_formats() {
+    use serde_json::json;
+
+    for (xml, order) in [
+        ("<OMI>0</OMI>", json!(0)),
+        ("<OMI>-1</OMI>", json!(-1)),
+        ("<OMI>9</OMI>", json!(9)),
+        (
+            r#"<OMA><OMS cd="nums1" name="rational"/><OMI>3</OMI><OMI>2</OMI></OMA>"#,
+            json!(["Rational", 3, 2]),
+        ),
+    ] {
+        let body = format!(r#"<OMA><OMS cd="linalg5" name="identity"/>{xml}</OMA>"#);
+        assert!(matches!(
+            import(object(&body).as_bytes()),
+            Err(Error::Domain(_))
+        ));
+        let input = serde_json::to_vec(&json!(["IdentityMatrix", order])).unwrap();
+        assert!(matches!(
+            symbio_core::mathjson::import(&input),
+            Err(Error::Domain(_))
+        ));
+    }
+}

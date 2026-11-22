@@ -31,6 +31,13 @@ pub enum Node {
     Pow(Id, Id),
     Call(String, Id),
     Apply(String, Vec<Id>),
+    MatrixSelector([Id; 3]),
+    VectorSelector(Id, Vec<Id>),
+    ScalarProduct(Vec<Id>, Vec<Id>),
+    VectorProduct(Vec<Id>, Vec<Id>),
+    OuterProduct(Vec<Id>, Vec<Id>),
+    MatrixTensor(Vec<Id>),
+    VectorTensor(Vec<Id>),
     Constant(String),
     Integral {
         body: Id,
@@ -79,8 +86,17 @@ impl Node {
             Self::Aggregate {
                 body, lower, upper, ..
             } => vec![*body, *lower, *upper],
+            Self::ScalarProduct(left, right)
+            | Self::VectorProduct(left, right)
+            | Self::OuterProduct(left, right) => left.iter().chain(right).copied().collect(),
+            Self::VectorSelector(index, entries) => std::iter::once(*index)
+                .chain(entries.iter().copied())
+                .collect(),
+            Self::MatrixSelector(args) => args.to_vec(),
             Self::Apply(_, args) => args.clone(),
-            Self::Matrix { entries, .. } => entries.clone(),
+            Self::Matrix { entries, .. }
+            | Self::MatrixTensor(entries)
+            | Self::VectorTensor(entries) => entries.clone(),
             Self::Solutions { values, .. } => values.clone(),
             _ => vec![],
         }
@@ -154,6 +170,19 @@ impl Graph {
                         return Err(Error::Invalid("symbol".into()));
                     }
                 }
+                Node::ScalarProduct(left, right)
+                | Node::VectorProduct(left, right)
+                | Node::OuterProduct(left, right)
+                    if left.len() > 32 || right.len() > 32 =>
+                {
+                    return Err(Error::Limit);
+                }
+                Node::MatrixTensor(args) | Node::VectorTensor(args)
+                    if !(2..=32).contains(&args.len()) =>
+                {
+                    return Err(Error::Limit);
+                }
+                Node::VectorSelector(_, entries) if entries.len() > 32 => return Err(Error::Limit),
                 Node::Apply(name, args) if !valid_symbol(name) || args.len() > 32 => {
                     return Err(Error::Invalid("function application".into()));
                 }
@@ -166,8 +195,11 @@ impl Graph {
                         "sqrt",
                         "abs",
                         "det",
+                        "identity",
                         "trace",
                         "rank",
+                        "rowcount",
+                        "columncount",
                         "transpose",
                         "inverse",
                         "floor",
@@ -416,7 +448,14 @@ impl Graph {
                 }
                 format!("<msup>{base}{}</msup>", f(*b, 0)?)
             }
-            Node::Apply(..) => self.format(id, true, depth)?,
+            Node::ScalarProduct(..)
+            | Node::VectorProduct(..)
+            | Node::OuterProduct(..)
+            | Node::MatrixTensor(..)
+            | Node::VectorTensor(..)
+            | Node::VectorSelector(..)
+            | Node::MatrixSelector(..)
+            | Node::Apply(..) => self.format(id, true, depth)?,
             Node::Call(name, a) => {
                 let a = f(*a, 0)?;
                 match name.as_str() {
@@ -529,6 +568,74 @@ impl Graph {
                     }
                 } else {
                     n.clone()
+                }
+            }
+            Node::ScalarProduct(left, right)
+            | Node::VectorProduct(left, right)
+            | Node::OuterProduct(left, right) => {
+                let (name, operator) = match &self.nodes[id] {
+                    Node::OuterProduct(..) => ("outerproduct", "⊗"),
+                    Node::VectorProduct(..) => ("vectorproduct", "×"),
+                    _ => ("scalarproduct", "·"),
+                };
+                let vector = |entries: &[Id]| -> Result<String> {
+                    let entries = entries
+                        .iter()
+                        .map(|entry| f(*entry))
+                        .collect::<Result<Vec<_>>>()?;
+                    Ok(if math {
+                        format!(
+                            "<mrow><mo>(</mo>{}<mo>)</mo></mrow>",
+                            entries.join("<mo>,</mo>")
+                        )
+                    } else {
+                        format!("[{}]", entries.join(", "))
+                    })
+                };
+                let (left, right) = (vector(left)?, vector(right)?);
+                if math {
+                    format!("<mrow>{left}<mo>{}</mo>{right}</mrow>", operator)
+                } else {
+                    format!("{}({left}, {right})", name)
+                }
+            }
+            Node::MatrixTensor(args) | Node::VectorTensor(args) => {
+                let args = args.iter().map(|arg| f(*arg)).collect::<Result<Vec<_>>>()?;
+                if math {
+                    format!("<mrow>{}</mrow>", args.join("<mo>⊗</mo>"))
+                } else {
+                    format!(
+                        "{}({})",
+                        if matches!(&self.nodes[id], Node::VectorTensor(..)) {
+                            "vectortensor"
+                        } else {
+                            "matrixtensor"
+                        },
+                        args.join(", ")
+                    )
+                }
+            }
+            Node::VectorSelector(index, entries) => {
+                let entries = entries
+                    .iter()
+                    .map(|entry| f(*entry))
+                    .collect::<Result<Vec<_>>>()?;
+                let index = f(*index)?;
+                if math {
+                    format!(
+                        "<mrow><mo>(</mo>{}<mo>)</mo><mo>[</mo>{index}<mo>]</mo></mrow>",
+                        entries.join("<mo>,</mo>")
+                    )
+                } else {
+                    format!("vectorselector({index}, [{}])", entries.join(", "))
+                }
+            }
+            Node::MatrixSelector([row, column, matrix]) => {
+                let (row, column, matrix) = (f(*row)?, f(*column)?, f(*matrix)?);
+                if math {
+                    format!("<mrow>{matrix}<mo>[</mo>{row}<mo>,</mo>{column}<mo>]</mo></mrow>")
+                } else {
+                    format!("matrixselector({row}, {column}, {matrix})")
                 }
             }
             Node::Apply(name, args) => {

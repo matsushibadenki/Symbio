@@ -168,12 +168,15 @@ pub fn parse(graph: &mut Graph, source: &str) -> Result<Id> {
                     "partial" => Token::Symbol("d".into()),
                     "pi" => Token::Command("pi".into()),
                     "top" => Token::Symbol("T".into()),
-                    "int" | "sum" | "prod" | "begin" | "end" | "trace" | "rank" | "det"
-                    | "lfloor" | "rfloor" | "lceil" | "rceil" => Token::Command(name),
+                    "int" | "sum" | "prod" | "begin" | "end" | "identity" | "trace" | "rank"
+                    | "rowcount" | "columncount" | "det" | "lfloor" | "rfloor" | "lceil"
+                    | "rceil" => Token::Command(name),
                     "cdot" | "times" => Token::Op('*'),
                     "div" => Token::Op('/'),
-                    "frac" | "dfrac" | "tfrac" | "sqrt" | "sin" | "cos" | "exp" | "ln" | "log"
-                    | "left" | "right" | "lvert" | "rvert" => Token::Command(name),
+                    "vectortensor" | "matrixtensor" | "outerproduct" | "vectorproduct"
+                    | "scalarproduct" | "vectorselector" | "matrixselector" | "frac" | "dfrac"
+                    | "tfrac" | "sqrt" | "sin" | "cos" | "exp" | "ln" | "log" | "left"
+                    | "right" | "lvert" | "rvert" => Token::Command(name),
                     // Greek letters are variables, never implicit physical or numeric constants.
                     "alpha" | "beta" | "gamma" | "delta" | "theta" | "lambda" | "mu" | "sigma"
                     | "omega" => Token::Symbol(name),
@@ -246,6 +249,26 @@ impl Parser<'_> {
         self.expect(Token::Op('}'))?;
         Ok(root)
     }
+    fn arguments(&mut self, depth: usize) -> Result<Vec<Id>> {
+        self.expect(Token::Op('{'))?;
+        self.level += 1;
+        let mut args = Vec::new();
+        if self.peek() != &Token::Op('}') {
+            loop {
+                if args.len() == 32 {
+                    return Err(Error::Limit);
+                }
+                args.push(self.expression(0, depth + 1)?);
+                if self.peek() != &Token::Op(',') {
+                    break;
+                }
+                self.take();
+            }
+        }
+        self.expect(Token::Op('}'))?;
+        self.level -= 1;
+        Ok(args)
+    }
     fn exponent(&mut self, depth: usize) -> Result<Id> {
         if self.peek() == &Token::Op('{') {
             return self.group(depth);
@@ -267,23 +290,7 @@ impl Parser<'_> {
                 self.graph.intern(Node::Approximate { decimal, precision })
             }
             Token::Apply(name) => {
-                self.expect(Token::Op('{'))?;
-                self.level += 1;
-                let mut args = Vec::new();
-                if self.peek() != &Token::Op('}') {
-                    loop {
-                        if args.len() == 32 {
-                            return Err(Error::Limit);
-                        }
-                        args.push(self.expression(0, depth + 1)?);
-                        if self.peek() != &Token::Op(',') {
-                            break;
-                        }
-                        self.take();
-                    }
-                }
-                self.expect(Token::Op('}'))?;
-                self.level -= 1;
+                let args = self.arguments(depth)?;
                 self.graph.intern(Node::Apply(name, args))
             }
             Token::Number(s) => parser::parse(self.graph, &s),
@@ -355,11 +362,44 @@ impl Parser<'_> {
                     let b = self.group(depth)?;
                     self.graph.intern(Node::Div(a, b))
                 }
+                "matrixtensor" | "vectortensor" => {
+                    let args = self.arguments(depth)?;
+                    if args.len() < 2 {
+                        return Err(Error::Parse(self.pos));
+                    }
+                    self.graph.intern(if s == "vectortensor" {
+                        Node::VectorTensor(args)
+                    } else {
+                        Node::MatrixTensor(args)
+                    })
+                }
+                "scalarproduct" | "vectorproduct" | "outerproduct" => {
+                    let left = self.arguments(depth)?;
+                    let right = self.arguments(depth)?;
+                    self.graph.intern(match s.as_str() {
+                        "outerproduct" => Node::OuterProduct(left, right),
+                        "vectorproduct" => Node::VectorProduct(left, right),
+                        _ => Node::ScalarProduct(left, right),
+                    })
+                }
+                "vectorselector" => {
+                    let index = self.group(depth)?;
+                    let entries = self.arguments(depth)?;
+                    self.graph.intern(Node::VectorSelector(index, entries))
+                }
+                "matrixselector" => {
+                    let row = self.group(depth)?;
+                    let column = self.group(depth)?;
+                    let matrix = self.group(depth)?;
+                    self.graph
+                        .intern(Node::MatrixSelector([row, column, matrix]))
+                }
                 "sqrt" => {
                     let a = self.group(depth)?;
                     self.graph.intern(Node::Call("sqrt".into(), a))
                 }
-                "sin" | "cos" | "exp" | "ln" | "log" | "det" | "trace" | "rank" => {
+                "sin" | "cos" | "exp" | "ln" | "log" | "det" | "identity" | "trace" | "rank"
+                | "rowcount" | "columncount" => {
                     let power = if self.peek() == &Token::Op('^') {
                         self.take();
                         Some(self.exponent(depth)?)
@@ -714,6 +754,54 @@ fn tex(g: &Graph, id: Id, depth: usize) -> Result<String> {
         Node::Mul(a, b) => format!(r"\left({}\cdot {}\right)", f(*a)?, f(*b)?),
         Node::Div(a, b) => format!(r"\frac{{{}}}{{{}}}", f(*a)?, f(*b)?),
         Node::Pow(a, b) => format!(r"\left({}\right)^{{{}}}", f(*a)?, f(*b)?),
+        Node::ScalarProduct(left, right)
+        | Node::VectorProduct(left, right)
+        | Node::OuterProduct(left, right) => {
+            let vector = |entries: &[Id]| -> Result<String> {
+                Ok(entries
+                    .iter()
+                    .map(|entry| f(*entry))
+                    .collect::<Result<Vec<_>>>()?
+                    .join(","))
+            };
+            format!(
+                r"\{}{{{}}}{{{}}}",
+                match &g.nodes[id] {
+                    Node::OuterProduct(..) => "outerproduct",
+                    Node::VectorProduct(..) => "vectorproduct",
+                    _ => "scalarproduct",
+                },
+                vector(left)?,
+                vector(right)?
+            )
+        }
+        Node::MatrixTensor(args) | Node::VectorTensor(args) => format!(
+            r"\{}{{{}}}",
+            if matches!(&g.nodes[id], Node::VectorTensor(..)) {
+                "vectortensor"
+            } else {
+                "matrixtensor"
+            },
+            args.iter()
+                .map(|id| f(*id))
+                .collect::<Result<Vec<_>>>()?
+                .join(",")
+        ),
+        Node::VectorSelector(index, entries) => format!(
+            r"\vectorselector{{{}}}{{{}}}",
+            f(*index)?,
+            entries
+                .iter()
+                .map(|entry| f(*entry))
+                .collect::<Result<Vec<_>>>()?
+                .join(",")
+        ),
+        Node::MatrixSelector([row, column, matrix]) => format!(
+            r"\matrixselector{{{}}}{{{}}}{{{}}}",
+            f(*row)?,
+            f(*column)?,
+            f(*matrix)?
+        ),
         Node::Apply(name, args) => format!(
             r"\symbioapply{{{name}}}{{{}}}",
             args.iter()

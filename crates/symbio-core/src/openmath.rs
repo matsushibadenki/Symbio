@@ -224,7 +224,18 @@ const MAPPINGS: &[(&str, &str, &str)] = &[
     ("rounding1", "ceiling", "Ceil"),
     ("linalg1", "determinant", "Determinant"),
     ("linalg1", "transpose", "Transpose"),
+    ("linalg1", "matrix_selector", "MatrixSelector"),
+    ("linalg1", "vector_selector", "VectorSelector"),
+    ("linalg1", "scalarproduct", "ScalarProduct"),
+    ("linalg1", "vectorproduct", "VectorProduct"),
+    ("linalg1", "outerproduct", "OuterProduct"),
+    ("linalg6", "matrix_tensor", "MatrixTensor"),
+    ("linalg6", "vector_tensor", "VectorTensor"),
+    ("linalg5", "identity", "IdentityMatrix"),
+    ("linalg2", "vector", "Vector"),
     ("linalg4", "rank", "Rank"),
+    ("linalg4", "rowcount", "RowCount"),
+    ("linalg4", "columncount", "ColumnCount"),
 ];
 fn decode(e: &Element) -> Result<Value> {
     match e.name.as_str() {
@@ -440,7 +451,11 @@ fn check_scope(expression: &Value) -> Result<()> {
                 | graph::Node::Sub(..)
                 | graph::Node::Div(..)
                 | graph::Node::Pow(..)
-        ) && !matches!(node, graph::Node::Call(f, _) if f == "transpose" || f == "inverse")
+                | graph::Node::VectorProduct(..)
+                | graph::Node::OuterProduct(..)
+                | graph::Node::MatrixTensor(..)
+                | graph::Node::VectorTensor(..)
+        ) && !matches!(node, graph::Node::Call(f, _) if matches!(f.as_str(), "transpose" | "inverse" | "identity"))
             && structured::shape(&graph, id)? != structured::Shape::Scalar
         {
             return Err(unsupported());

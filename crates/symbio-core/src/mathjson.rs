@@ -156,6 +156,91 @@ pub fn decode(g: &mut Graph, v: &Value) -> Result<Id> {
         let a = head(v).ok_or_else(unsupported)?;
         let f = a.first().and_then(Value::as_str).ok_or_else(unsupported)?;
         let args = &a[1..];
+        if f == "VectorTensor" {
+            if !(2..=32).contains(&args.len()) {
+                return Err(unsupported());
+            }
+            let mut operands = Vec::with_capacity(args.len());
+            for arg in args {
+                let vector = head(arg)
+                    .filter(|items| items.first() == Some(&json!("Vector")))
+                    .ok_or_else(unsupported)?;
+                let cols = vector.len() - 1;
+                if !(1..=8).contains(&cols) {
+                    return Err(Error::Limit);
+                }
+                let entries = vector[1..]
+                    .iter()
+                    .map(|entry| go(g, entry, depth + 1, budget))
+                    .collect::<Result<Vec<_>>>()?;
+                operands.push(g.intern(Node::Matrix {
+                    rows: 1,
+                    cols,
+                    entries,
+                })?);
+            }
+            return g.intern(Node::VectorTensor(operands));
+        }
+        if f == "MatrixTensor" {
+            if !(2..=32).contains(&args.len()) {
+                return Err(unsupported());
+            }
+            let args = args
+                .iter()
+                .map(|arg| go(g, arg, depth + 1, budget))
+                .collect::<Result<Vec<_>>>()?;
+            return g.intern(Node::MatrixTensor(args));
+        }
+        if matches!(f, "ScalarProduct" | "VectorProduct" | "OuterProduct") {
+            let [left, right] = args else {
+                return Err(unsupported());
+            };
+            let mut vector = |value| -> Result<Vec<Id>> {
+                let entries = head(value)
+                    .filter(|items| items.first() == Some(&json!("Vector")))
+                    .ok_or_else(unsupported)?;
+                if entries.len() > 33 {
+                    return Err(Error::Limit);
+                }
+                entries[1..]
+                    .iter()
+                    .map(|entry| go(g, entry, depth + 1, budget))
+                    .collect()
+            };
+            let left = vector(left)?;
+            let right = vector(right)?;
+            return g.intern(match f {
+                "OuterProduct" => Node::OuterProduct(left, right),
+                "VectorProduct" => Node::VectorProduct(left, right),
+                _ => Node::ScalarProduct(left, right),
+            });
+        }
+        if f == "VectorSelector" {
+            let [index, vector] = args else {
+                return Err(unsupported());
+            };
+            let vector = head(vector)
+                .filter(|items| items.first() == Some(&json!("Vector")))
+                .ok_or_else(unsupported)?;
+            if vector.len() > 33 {
+                return Err(Error::Limit);
+            }
+            let index = go(g, index, depth + 1, budget)?;
+            let entries = vector[1..]
+                .iter()
+                .map(|entry| go(g, entry, depth + 1, budget))
+                .collect::<Result<Vec<_>>>()?;
+            return g.intern(Node::VectorSelector(index, entries));
+        }
+        if f == "MatrixSelector" {
+            let [row, column, matrix] = args else {
+                return Err(unsupported());
+            };
+            let row = go(g, row, depth + 1, budget)?;
+            let column = go(g, column, depth + 1, budget)?;
+            let matrix = go(g, matrix, depth + 1, budget)?;
+            return g.intern(Node::MatrixSelector([row, column, matrix]));
+        }
         if f == "Apply" {
             let (name, args) = args.split_first().ok_or_else(unsupported)?;
             let name = name
@@ -274,7 +359,14 @@ pub fn decode(g: &mut Graph, v: &Value) -> Result<Id> {
         }
         if matches!(
             f,
-            "Determinant" | "Transpose" | "Inverse" | "Trace" | "Rank"
+            "Determinant"
+                | "Transpose"
+                | "Inverse"
+                | "Trace"
+                | "Rank"
+                | "RowCount"
+                | "ColumnCount"
+                | "IdentityMatrix"
         ) {
             if args.len() != 1 {
                 return Err(unsupported());
@@ -286,6 +378,9 @@ pub fn decode(g: &mut Graph, v: &Value) -> Result<Id> {
                     "Transpose" => "transpose",
                     "Trace" => "trace",
                     "Rank" => "rank",
+                    "IdentityMatrix" => "identity",
+                    "RowCount" => "rowcount",
+                    "ColumnCount" => "columncount",
                     _ => "inverse",
                 }
                 .into(),
@@ -420,6 +515,63 @@ pub fn encode(g: &Graph, root: Id) -> Result<Value> {
                     go(g, *y, depth + 1, budget)?
                 ])
             }
+            Node::ScalarProduct(left, right)
+            | Node::VectorProduct(left, right)
+            | Node::OuterProduct(left, right) => {
+                let mut vector = |entries: &[Id]| -> Result<Value> {
+                    let mut vector = vec![json!("Vector")];
+                    for entry in entries {
+                        vector.push(go(g, *entry, depth + 1, budget)?);
+                    }
+                    Ok(Value::Array(vector))
+                };
+                json!([
+                    match &g.nodes[id] {
+                        Node::OuterProduct(..) => "OuterProduct",
+                        Node::VectorProduct(..) => "VectorProduct",
+                        _ => "ScalarProduct",
+                    },
+                    vector(left)?,
+                    vector(right)?
+                ])
+            }
+            Node::VectorTensor(args) => {
+                let mut expression = vec![json!("VectorTensor")];
+                for arg in args {
+                    let Node::Matrix {
+                        rows: 1, entries, ..
+                    } = &g.nodes[*arg]
+                    else {
+                        return Err(unsupported());
+                    };
+                    let mut vector = vec![json!("Vector")];
+                    for entry in entries {
+                        vector.push(go(g, *entry, depth + 1, budget)?);
+                    }
+                    expression.push(Value::Array(vector));
+                }
+                Value::Array(expression)
+            }
+            Node::MatrixTensor(args) => {
+                let mut expression = vec![json!("MatrixTensor")];
+                for arg in args {
+                    expression.push(go(g, *arg, depth + 1, budget)?);
+                }
+                Value::Array(expression)
+            }
+            Node::VectorSelector(index, entries) => {
+                let mut vector = vec![json!("Vector")];
+                for entry in entries {
+                    vector.push(go(g, *entry, depth + 1, budget)?);
+                }
+                json!(["VectorSelector", go(g, *index, depth + 1, budget)?, vector])
+            }
+            Node::MatrixSelector([row, column, matrix]) => json!([
+                "MatrixSelector",
+                go(g, *row, depth + 1, budget)?,
+                go(g, *column, depth + 1, budget)?,
+                go(g, *matrix, depth + 1, budget)?
+            ]),
             Node::Apply(name, args) => {
                 let mut application = vec![json!("Apply"), json!({"sym": name})];
                 for arg in args {
@@ -440,6 +592,9 @@ pub fn encode(g: &Graph, root: Id) -> Result<Value> {
                     "det" => "Determinant",
                     "trace" => "Trace",
                     "rank" => "Rank",
+                    "identity" => "IdentityMatrix",
+                    "rowcount" => "RowCount",
+                    "columncount" => "ColumnCount",
                     "transpose" => "Transpose",
                     "inverse" => "Inverse",
                     _ => return Err(unsupported()),

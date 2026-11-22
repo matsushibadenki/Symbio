@@ -22,6 +22,14 @@ fn total(g: &Graph, id: Id) -> bool {
         _ => false,
     }
 }
+fn selector_index(g: &Graph, id: Id, bound: usize) -> Result<usize> {
+    g.value(id)
+        .filter(|value| value.is_integer())
+        .and_then(|value| value.to_usize())
+        .filter(|index| (1..=bound).contains(index))
+        .ok_or_else(|| Error::Domain("selector index must be an in-range integer".into()))
+}
+
 pub fn simplify(g: &mut Graph, root: Id, a: &Assumptions) -> Result<Id> {
     fn go(
         g: &mut Graph,
@@ -61,10 +69,139 @@ pub fn simplify(g: &mut Graph, root: Id, a: &Assumptions) -> Result<Id> {
         }
         let result = match n {
             Node::Number(_) | Node::Symbol(_) => id,
+            Node::MatrixTensor(..) | Node::VectorTensor(..) => {
+                let mut result = out[0];
+                for &operand in &out[1..] {
+                    let (
+                        Node::Matrix {
+                            rows,
+                            cols,
+                            entries: left,
+                        },
+                        Node::Matrix {
+                            rows: height,
+                            cols: width,
+                            entries: right,
+                        },
+                    ) = (g.nodes[result].clone(), g.nodes[operand].clone())
+                    else {
+                        return Err(Error::Domain(
+                            "matrix tensor requires matrix operands".into(),
+                        ));
+                    };
+                    let (result_rows, result_cols) = (rows * height, cols * width);
+                    if result_rows > 8 || result_cols > 8 {
+                        return Err(Error::Limit);
+                    }
+                    let mut entries = Vec::with_capacity(result_rows * result_cols);
+                    for row in 0..result_rows {
+                        for col in 0..result_cols {
+                            let x = left[(row / height) * cols + col / width];
+                            let y = right[(row % height) * width + col % width];
+                            let product = g.intern(Node::Mul(x, y))?;
+                            entries.push(go(g, product, a, memo, depth + 1)?);
+                        }
+                    }
+                    result = g.intern(Node::Matrix {
+                        rows: result_rows,
+                        cols: result_cols,
+                        entries,
+                    })?;
+                }
+                result
+            }
+            Node::OuterProduct(left, right) => {
+                let (rows, cols) = (left.len(), right.len());
+                let (left, right) = out.split_at(rows);
+                let mut entries = Vec::with_capacity(rows * cols);
+                for &x in left {
+                    for &y in right {
+                        let product = g.intern(Node::Mul(x, y))?;
+                        entries.push(go(g, product, a, memo, depth + 1)?);
+                    }
+                }
+                g.intern(Node::Matrix {
+                    rows,
+                    cols,
+                    entries,
+                })?
+            }
+            Node::VectorProduct(left, right) => {
+                if left.len() != 3 || right.len() != 3 {
+                    return Err(Error::Domain(
+                        "vector product requires two three-component vectors".into(),
+                    ));
+                }
+                let (left, right) = out.split_at(3);
+                let mut entries = Vec::with_capacity(3);
+                for (j, k) in [(1, 2), (2, 0), (0, 1)] {
+                    let forward = g.intern(Node::Mul(left[j], right[k]))?;
+                    let reverse = g.intern(Node::Mul(left[k], right[j]))?;
+                    let component = g.intern(Node::Sub(forward, reverse))?;
+                    entries.push(go(g, component, a, memo, depth + 1)?);
+                }
+                g.intern(Node::Matrix {
+                    rows: 1,
+                    cols: 3,
+                    entries,
+                })?
+            }
+            Node::ScalarProduct(left, right) => {
+                if left.len() != right.len() {
+                    return Err(Error::Domain(
+                        "scalar product requires equal vector lengths".into(),
+                    ));
+                }
+                let (left, right) = out.split_at(left.len());
+                let mut sum = g.number(0)?;
+                for (&x, &y) in left.iter().zip(right) {
+                    let product = g.intern(Node::Mul(x, y))?;
+                    sum = g.intern(Node::Add(sum, product))?;
+                }
+                go(g, sum, a, memo, depth + 1)?
+            }
+            Node::VectorSelector(..) => out[selector_index(g, out[0], out.len() - 1)?],
+            Node::MatrixSelector(..) => {
+                let Node::Matrix {
+                    rows,
+                    cols,
+                    entries,
+                } = &g.nodes[out[2]]
+                else {
+                    return Err(Error::Domain("matrix required".into()));
+                };
+                let row = selector_index(g, out[0], *rows)?;
+                let column = selector_index(g, out[1], *cols)?;
+                entries[(row - 1) * cols + column - 1]
+            }
             Node::Apply(name, _) => g.intern(Node::Apply(name, out))?,
+            Node::Call(f, order) if f == "identity" => {
+                let order = crate::structured::identity_order(g, order)?;
+                let zero = g.number(0)?;
+                let one = g.number(1)?;
+                let mut entries = vec![zero; order * order];
+                for i in 0..order {
+                    entries[i * (order + 1)] = one;
+                }
+                g.intern(Node::Matrix {
+                    rows: order,
+                    cols: order,
+                    entries,
+                })?
+            }
             Node::Call(f, _) => {
                 let v = out[0];
-                if ["det", "inverse", "transpose", "trace", "rank"].contains(&f.as_str()) {
+                if [
+                    "det",
+                    "inverse",
+                    "transpose",
+                    "trace",
+                    "rank",
+                    "rowcount",
+                    "columncount",
+                ]
+                .contains(&f.as_str())
+                {
                     let r = crate::structured::matrix_call(g, &f, v, a)?;
                     memo.insert(id, r);
                     return Ok(r);
@@ -446,7 +583,14 @@ pub fn dimension(
                 _ => Ok(None),
             }
         }
-        Node::Apply(..) => Ok(None),
+        Node::ScalarProduct(..)
+        | Node::VectorProduct(..)
+        | Node::OuterProduct(..)
+        | Node::MatrixTensor(..)
+        | Node::VectorTensor(..)
+        | Node::VectorSelector(..)
+        | Node::MatrixSelector(..)
+        | Node::Apply(..) => Ok(None),
         Node::Call(f, a) => {
             let dim = d(*a)?;
             if f == "abs" {
