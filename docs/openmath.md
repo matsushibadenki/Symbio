@@ -39,6 +39,10 @@ Mappings follow the [OpenMath XML standard](https://openmath.org/standard/om20-2
 | `linalg4.rowcount`, `linalg4.columncount` | Exact row and column counts of a matrix |
 | `linalg4.rank` | Exact rank of a rectangular matrix with rational entries |
 | `symbio_linalg1.trace` | Sum of the diagonal entries of a square matrix. Requires the [Symbio dictionary](openmath-cd/symbio_linalg1.ocd) and its explicit `urn:symbio:cd` base. |
+| `linalg5.diagonal_matrix` | Square matrix with 1–8 ordered scalar diagonal entries and zeros elsewhere. |
+| `linalg5.scalar(n, value)` | Scalar multiple of the identity of order 1–8. |
+| `linalg5.constant(n, value)` | Square matrix of order 1–8 with the same scalar in every entry. |
+| `linalg5.zero(rows, columns)` | Exact rectangular zero matrix. Both dimensions are integers from 1 to 8. |
 | `linalg5.identity(n)` | Exact square identity matrix of order 1–8. Invalid orders produce a domain error at import. |
 | `linalg6.vector_tensor` | Ordered Kronecker product of 2–32 explicit row vectors. The result is displayed as a single row of up to 8 entries. |
 | `linalg6.matrix_tensor` | Ordered matrix Kronecker product using SymPy block order. Accepts 2–32 operands, with each result dimension limited to 8. |
@@ -100,7 +104,7 @@ Named symbolic calls use an `OMA` headed by an `OMV`, with up to 32 ordered scal
 
 ## External codec interoperability
 
-`scripts/check-openmath-interop.py` exercises 39 cases through [py-openmath 0.3.0](https://github.com/OpenMath/py-openmath). It compares the authored MathJSON expression and context before and after Symbio XML export, external decoding and encoding, and Symbio reimport. Expected exact matrix results and domain errors are checked in Symbio. The application test also compares the function names, ordered arguments and nesting against the original MathJSON. py-openmath provides the independent XML codec. Symbio performs the evaluation.
+`scripts/check-openmath-interop.py` exercises 49 cases through [py-openmath 0.3.0](https://github.com/OpenMath/py-openmath). It compares the authored MathJSON expression and context before and after Symbio XML export, external decoding and encoding, and Symbio reimport. Expected exact matrix results and domain errors are checked in Symbio. The application test also compares the function names, ordered arguments and nesting against the original MathJSON. py-openmath provides the independent XML codec. Symbio performs the evaluation.
 
 ```sh
 python3 -m venv /tmp/symbio-openmath-venv
@@ -110,7 +114,7 @@ python3 -m venv /tmp/symbio-openmath-venv
 
 ## External CAS comparison
 
-Run the same check with `--sympy` after installing `sympy==1.14.0` in the test environment. The test translates the OpenMath objects decoded by py-openmath into SymPy integers, rationals and matrices. Both CAS engines evaluate the same serialized expression. Thirty-one successful linear algebra cases matched exactly, including the matrix product, inverse, exponent −2 scalar division by 3, rational trace, and rectangular, rank-deficient and zero-matrix ranks. For singularity and zero division, SymPy raised `NonInvertibleMatrixError` on the singular inverse and returned non-finite matrix entries on zero division. Symbio reported `domain_error` with no result in both cases. For indices beyond the last row or column, SymPy raised `IndexError` and Symbio reported `domain_error`.
+Run the same check with `--sympy` after installing `sympy==1.14.0` in the test environment. The test translates the OpenMath objects decoded by py-openmath into SymPy integers, rationals and matrices. Both CAS engines evaluate the same serialized expression. Forty-one successful linear algebra cases matched exactly, including the matrix product, inverse, exponent −2 scalar division by 3, rational trace, and rectangular, rank-deficient and zero-matrix ranks. For singularity and zero division, SymPy raised `NonInvertibleMatrixError` on the singular inverse and returned non-finite matrix entries on zero division. Symbio reported `domain_error` with no result in both cases. For indices beyond the last row or column, SymPy raised `IndexError` and Symbio reported `domain_error`.
 
 ```sh
 /tmp/symbio-openmath-venv/bin/python -m pip install sympy==1.14.0
@@ -126,3 +130,5 @@ The outer product fixtures compare a 2×3 rational result, its transpose, and th
 For `linalg6.matrix_tensor(A, B)`, Symbio uses the block convention in which block `(i, j)` is `A[i, j] * B`. The fixtures compare both operand orders and a three-factor product with SymPy.
 
 The vector tensor fixtures compare both orders of a two-entry and a three-entry vector plus a three-factor product. The checks compare every exact component and the full result length.
+
+Signed-value fixtures check a scalar matrix with diagonal entries of `-2/3` and exact division of a matrix containing a negative element. The comparisons check the authored form across the exchange and the resulting exact values.

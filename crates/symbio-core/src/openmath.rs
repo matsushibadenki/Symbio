@@ -232,6 +232,10 @@ const MAPPINGS: &[(&str, &str, &str)] = &[
     ("linalg6", "matrix_tensor", "MatrixTensor"),
     ("linalg6", "vector_tensor", "VectorTensor"),
     ("linalg5", "identity", "IdentityMatrix"),
+    ("linalg5", "zero", "ZeroMatrix"),
+    ("linalg5", "constant", "ConstantMatrix"),
+    ("linalg5", "scalar", "ScalarMatrix"),
+    ("linalg5", "diagonal_matrix", "DiagonalMatrix"),
     ("linalg2", "vector", "Vector"),
     ("linalg4", "rank", "Rank"),
     ("linalg4", "rowcount", "RowCount"),
@@ -453,6 +457,10 @@ fn check_scope(expression: &Value) -> Result<()> {
                 | graph::Node::Pow(..)
                 | graph::Node::VectorProduct(..)
                 | graph::Node::OuterProduct(..)
+                | graph::Node::ZeroMatrix(..)
+                | graph::Node::ConstantMatrix(..)
+                | graph::Node::ScalarMatrix(..)
+                | graph::Node::DiagonalMatrix(..)
                 | graph::Node::MatrixTensor(..)
                 | graph::Node::VectorTensor(..)
         ) && !matches!(node, graph::Node::Call(f, _) if matches!(f.as_str(), "transpose" | "inverse" | "identity"))

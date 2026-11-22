@@ -173,7 +173,8 @@ pub fn parse(graph: &mut Graph, source: &str) -> Result<Id> {
                     | "rceil" => Token::Command(name),
                     "cdot" | "times" => Token::Op('*'),
                     "div" => Token::Op('/'),
-                    "vectortensor" | "matrixtensor" | "outerproduct" | "vectorproduct"
+                    "scalarmatrix" | "diagonalmatrix" | "constantmatrix" | "zeromatrix"
+                    | "vectortensor" | "matrixtensor" | "outerproduct" | "vectorproduct"
                     | "scalarproduct" | "vectorselector" | "matrixselector" | "frac" | "dfrac"
                     | "tfrac" | "sqrt" | "sin" | "cos" | "exp" | "ln" | "log" | "left"
                     | "right" | "lvert" | "rvert" => Token::Command(name),
@@ -333,6 +334,9 @@ impl Parser<'_> {
             }
             Token::Op('-') => {
                 let b = self.expression(5, depth + 1)?;
+                if let Some(value) = self.graph.value(b) {
+                    return self.graph.rat(-value);
+                }
                 let a = self.graph.number(-1)?;
                 self.graph.intern(Node::Mul(a, b))
             }
@@ -361,6 +365,24 @@ impl Parser<'_> {
                     let a = self.group(depth)?;
                     let b = self.group(depth)?;
                     self.graph.intern(Node::Div(a, b))
+                }
+                "diagonalmatrix" => {
+                    let entries = self.arguments(depth)?;
+                    self.graph.intern(Node::DiagonalMatrix(entries))
+                }
+                "constantmatrix" | "scalarmatrix" => {
+                    let order = self.group(depth)?;
+                    let value = self.group(depth)?;
+                    self.graph.intern(if s == "scalarmatrix" {
+                        Node::ScalarMatrix(order, value)
+                    } else {
+                        Node::ConstantMatrix(order, value)
+                    })
+                }
+                "zeromatrix" => {
+                    let rows = self.group(depth)?;
+                    let cols = self.group(depth)?;
+                    self.graph.intern(Node::ZeroMatrix(rows, cols))
                 }
                 "matrixtensor" | "vectortensor" => {
                     let args = self.arguments(depth)?;
@@ -775,6 +797,21 @@ fn tex(g: &Graph, id: Id, depth: usize) -> Result<String> {
                 vector(right)?
             )
         }
+        Node::DiagonalMatrix(entries) => format!(
+            r"\diagonalmatrix{{{}}}",
+            entries
+                .iter()
+                .map(|entry| f(*entry))
+                .collect::<Result<Vec<_>>>()?
+                .join(",")
+        ),
+        Node::ScalarMatrix(order, value) => {
+            format!(r"\scalarmatrix{{{}}}{{{}}}", f(*order)?, f(*value)?)
+        }
+        Node::ConstantMatrix(order, value) => {
+            format!(r"\constantmatrix{{{}}}{{{}}}", f(*order)?, f(*value)?)
+        }
+        Node::ZeroMatrix(rows, cols) => format!(r"\zeromatrix{{{}}}{{{}}}", f(*rows)?, f(*cols)?),
         Node::MatrixTensor(args) | Node::VectorTensor(args) => format!(
             r"\{}{{{}}}",
             if matches!(&g.nodes[id], Node::VectorTensor(..)) {

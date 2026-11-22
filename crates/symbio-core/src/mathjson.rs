@@ -156,6 +156,38 @@ pub fn decode(g: &mut Graph, v: &Value) -> Result<Id> {
         let a = head(v).ok_or_else(unsupported)?;
         let f = a.first().and_then(Value::as_str).ok_or_else(unsupported)?;
         let args = &a[1..];
+        if f == "DiagonalMatrix" {
+            if !(1..=8).contains(&args.len()) {
+                return Err(Error::Domain(
+                    "diagonal matrix requires 1 to 8 entries".into(),
+                ));
+            }
+            let entries = args
+                .iter()
+                .map(|entry| go(g, entry, depth + 1, budget))
+                .collect::<Result<Vec<_>>>()?;
+            return g.intern(Node::DiagonalMatrix(entries));
+        }
+        if matches!(f, "ConstantMatrix" | "ScalarMatrix") {
+            let [order, value] = args else {
+                return Err(unsupported());
+            };
+            let order = go(g, order, depth + 1, budget)?;
+            let value = go(g, value, depth + 1, budget)?;
+            return g.intern(if f == "ScalarMatrix" {
+                Node::ScalarMatrix(order, value)
+            } else {
+                Node::ConstantMatrix(order, value)
+            });
+        }
+        if f == "ZeroMatrix" {
+            let [rows, cols] = args else {
+                return Err(unsupported());
+            };
+            let rows = go(g, rows, depth + 1, budget)?;
+            let cols = go(g, cols, depth + 1, budget)?;
+            return g.intern(Node::ZeroMatrix(rows, cols));
+        }
         if f == "VectorTensor" {
             if !(2..=32).contains(&args.len()) {
                 return Err(unsupported());
@@ -535,6 +567,28 @@ pub fn encode(g: &Graph, root: Id) -> Result<Value> {
                     vector(right)?
                 ])
             }
+            Node::DiagonalMatrix(entries) => {
+                let mut expression = vec![json!("DiagonalMatrix")];
+                for entry in entries {
+                    expression.push(go(g, *entry, depth + 1, budget)?);
+                }
+                Value::Array(expression)
+            }
+            Node::ScalarMatrix(order, value) => json!([
+                "ScalarMatrix",
+                go(g, *order, depth + 1, budget)?,
+                go(g, *value, depth + 1, budget)?
+            ]),
+            Node::ConstantMatrix(order, value) => json!([
+                "ConstantMatrix",
+                go(g, *order, depth + 1, budget)?,
+                go(g, *value, depth + 1, budget)?
+            ]),
+            Node::ZeroMatrix(rows, cols) => json!([
+                "ZeroMatrix",
+                go(g, *rows, depth + 1, budget)?,
+                go(g, *cols, depth + 1, budget)?
+            ]),
             Node::VectorTensor(args) => {
                 let mut expression = vec![json!("VectorTensor")];
                 for arg in args {

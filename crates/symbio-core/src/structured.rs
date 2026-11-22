@@ -116,6 +116,23 @@ pub fn shape(g: &Graph, root: Id) -> Result<Shape> {
                     }
                 }
             }
+            Node::DiagonalMatrix(entries) => {
+                scalar()?;
+                if !(1..=8).contains(&entries.len()) {
+                    return Err(Error::Domain(
+                        "diagonal matrix requires 1 to 8 entries".into(),
+                    ));
+                }
+                Shape::Matrix(entries.len(), entries.len())
+            }
+            Node::ConstantMatrix(order, _) | Node::ScalarMatrix(order, _) => {
+                scalar()?;
+                let order = matrix_dimension(g, *order)?;
+                Shape::Matrix(order, order)
+            }
+            Node::ZeroMatrix(rows, cols) => {
+                Shape::Matrix(matrix_dimension(g, *rows)?, matrix_dimension(g, *cols)?)
+            }
             Node::MatrixTensor(..) | Node::VectorTensor(..) => {
                 let (mut rows, mut cols) = (1, 1);
                 for operand in shapes {
@@ -157,7 +174,7 @@ pub fn shape(g: &Graph, root: Id) -> Result<Shape> {
                 }
             },
             Node::Call(f, order) if f == "identity" => {
-                let order = identity_order(g, *order)?;
+                let order = matrix_dimension(g, *order)?;
                 Shape::Matrix(order, order)
             }
             Node::Call(f, _) => match (f.as_str(), shapes[0]) {
@@ -198,6 +215,10 @@ pub fn rebuild(n: &Node, c: &[Id]) -> Node {
         Node::Pow(..) => Node::Pow(c[0], c[1]),
         Node::Equation(..) => Node::Equation(c[0], c[1]),
         Node::Call(f, _) => Node::Call(f.clone(), c[0]),
+        Node::DiagonalMatrix(..) => Node::DiagonalMatrix(c.to_vec()),
+        Node::ScalarMatrix(..) => Node::ScalarMatrix(c[0], c[1]),
+        Node::ConstantMatrix(..) => Node::ConstantMatrix(c[0], c[1]),
+        Node::ZeroMatrix(..) => Node::ZeroMatrix(c[0], c[1]),
         Node::MatrixTensor(..) => Node::MatrixTensor(c.to_vec()),
         Node::VectorTensor(..) => Node::VectorTensor(c.to_vec()),
         Node::OuterProduct(left, _) => {
@@ -734,12 +755,12 @@ pub fn matrix_binary(g: &mut Graph, n: &Node, x: Id, y: Id, a: &Assumptions) -> 
     Ok(Some(result))
 }
 
-pub(crate) fn identity_order(g: &Graph, order: Id) -> Result<usize> {
+pub(crate) fn matrix_dimension(g: &Graph, order: Id) -> Result<usize> {
     g.value(order)
         .filter(|value| value.is_integer())
         .and_then(|value| value.to_usize())
         .filter(|order| (1..=8).contains(order))
-        .ok_or_else(|| Error::Domain("identity order must be an integer from 1 to 8".into()))
+        .ok_or_else(|| Error::Domain("matrix dimension must be an integer from 1 to 8".into()))
 }
 
 pub fn matrix_call(g: &mut Graph, f: &str, id: Id, a: &Assumptions) -> Result<Id> {

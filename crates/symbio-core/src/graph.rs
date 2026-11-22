@@ -37,6 +37,10 @@ pub enum Node {
     VectorProduct(Vec<Id>, Vec<Id>),
     OuterProduct(Vec<Id>, Vec<Id>),
     MatrixTensor(Vec<Id>),
+    ZeroMatrix(Id, Id),
+    ConstantMatrix(Id, Id),
+    ScalarMatrix(Id, Id),
+    DiagonalMatrix(Vec<Id>),
     VectorTensor(Vec<Id>),
     Constant(String),
     Integral {
@@ -75,6 +79,9 @@ impl Node {
             | Self::Mul(a, b)
             | Self::Div(a, b)
             | Self::Pow(a, b)
+            | Self::ConstantMatrix(a, b)
+            | Self::ScalarMatrix(a, b)
+            | Self::ZeroMatrix(a, b)
             | Self::Equation(a, b) => vec![*a, *b],
             Self::Call(_, a) | Self::Derivative { body: a, .. } => vec![*a],
             Self::Integral {
@@ -95,6 +102,7 @@ impl Node {
             Self::MatrixSelector(args) => args.to_vec(),
             Self::Apply(_, args) => args.clone(),
             Self::Matrix { entries, .. }
+            | Self::DiagonalMatrix(entries)
             | Self::MatrixTensor(entries)
             | Self::VectorTensor(entries) => entries.clone(),
             Self::Solutions { values, .. } => values.clone(),
@@ -451,6 +459,10 @@ impl Graph {
             Node::ScalarProduct(..)
             | Node::VectorProduct(..)
             | Node::OuterProduct(..)
+            | Node::DiagonalMatrix(..)
+            | Node::ConstantMatrix(..)
+            | Node::ScalarMatrix(..)
+            | Node::ZeroMatrix(..)
             | Node::MatrixTensor(..)
             | Node::VectorTensor(..)
             | Node::VectorSelector(..)
@@ -597,6 +609,46 @@ impl Graph {
                     format!("<mrow>{left}<mo>{}</mo>{right}</mrow>", operator)
                 } else {
                     format!("{}({left}, {right})", name)
+                }
+            }
+            Node::DiagonalMatrix(entries) => {
+                let entries = entries
+                    .iter()
+                    .map(|entry| f(*entry))
+                    .collect::<Result<Vec<_>>>()?;
+                if math {
+                    format!(
+                        "<mrow><mi>diag</mi><mo>(</mo>{}<mo>)</mo></mrow>",
+                        entries.join("<mo>,</mo>")
+                    )
+                } else {
+                    format!("diagonal({})", entries.join(", "))
+                }
+            }
+            Node::ScalarMatrix(order, value) => {
+                let (order, value) = (f(*order)?, f(*value)?);
+                if math {
+                    format!("<mrow>{value}<msub><mi>I</mi>{order}</msub></mrow>")
+                } else {
+                    format!("scalarmatrix({order}, {value})")
+                }
+            }
+            Node::ConstantMatrix(order, value) => {
+                let (order, value) = (f(*order)?, f(*value)?);
+                if math {
+                    format!(
+                        "<mrow><mi>constant</mi><mo>(</mo>{order}<mo>,</mo>{value}<mo>)</mo></mrow>"
+                    )
+                } else {
+                    format!("constantmatrix({order}, {value})")
+                }
+            }
+            Node::ZeroMatrix(rows, cols) => {
+                let (rows, cols) = (f(*rows)?, f(*cols)?);
+                if math {
+                    format!("<mrow><mi>zero</mi><mo>(</mo>{rows}<mo>,</mo>{cols}<mo>)</mo></mrow>")
+                } else {
+                    format!("zeromatrix({rows}, {cols})")
                 }
             }
             Node::MatrixTensor(args) | Node::VectorTensor(args) => {

@@ -87,3 +87,11 @@ Named symbolic applications can be exchanged as `["Apply", {"sym":"f"}, "x"]`. T
 `["VectorTensor", ["Vector", ...left], ["Vector", ...right], ...]` preserves the ordered explicit vectors in a Kronecker product. It accepts 2–32 nonempty vectors whose lengths multiply to at most 8. The result is displayed as a single row.
 
 `["IdentityMatrix", n]` constructs an exact square identity matrix for an integer literal of order 1–8. OpenMath exchange preserves the constructor and its order. Invalid orders produce a domain error at import.
+
+`["ZeroMatrix", rows, columns]` constructs an exact zero matrix and preserves its ordered dimensions during OpenMath exchange. Both dimensions must be integers from 1 to 8.
+
+`["ConstantMatrix", n, value]` constructs a square matrix of order 1–8 with the same scalar in every entry. OpenMath exchange preserves the constructor, order and scalar expression.
+
+`["DiagonalMatrix", a, b, ...]` constructs a square matrix from 1–8 ordered diagonal entries. It preserves the constructor and entry order during OpenMath exchange.
+
+`["ScalarMatrix", n, value]` constructs a scalar multiple of the identity of order 1–8 and preserves the constructor and both arguments during OpenMath exchange.

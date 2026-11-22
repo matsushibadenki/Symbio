@@ -48,6 +48,10 @@ def evaluate_matrix_xml(document, cas):
             ("arith1", "power"): lambda a, b: a ** b,
             ("linalg1", "transpose"): lambda a: a.T,
             ("linalg5", "identity"): cas.eye,
+            ("linalg5", "zero"): cas.zeros,
+            ("linalg5", "diagonal_matrix"): cas.diag,
+            ("linalg5", "scalar"): lambda n, value: cas.eye(n) * value,
+            ("linalg5", "constant"): lambda n, value: cas.ones(n, n) * value,
             ("linalg6", "matrix_tensor"): cas.kronecker_product,
             ("linalg6", "vector_tensor"): cas.kronecker_product,
             ("linalg1", "outerproduct"): lambda a, b: a.T * b,
@@ -102,6 +106,16 @@ def main():
     vector_left = ["Vector", ["Rational", 1, 2], 2]
     vector_right = ["Vector", 3, ["Rational", 2, 3], 6]
     cases = [
+        ("scalar-matrix-negative", ["ScalarMatrix", 2, ["Rational", -2, 3]], "matrix(2x2; -2/3, 0, 0, -2/3)", None),
+        ("division-negative", ["Divide", matrix([-3, 1]), 2], "matrix(1x2; -3/2, 1/2)", None),
+        ("scalar-matrix", ["ScalarMatrix", 2, ["Rational", 2, 3]], "matrix(2x2; 2/3, 0, 0, 2/3)", None),
+        ("scalar-matrix-det", ["Determinant", ["ScalarMatrix", 2, ["Rational", 2, 3]]], "4/9", None),
+        ("diagonal-matrix", ["DiagonalMatrix", ["Rational", 2, 3], 0, 5], "matrix(3x3; 2/3, 0, 0, 0, 0, 0, 0, 0, 5)", None),
+        ("diagonal-matrix-det", ["Determinant", ["DiagonalMatrix", ["Rational", 2, 3], 5]], "10/3", None),
+        ("constant-matrix", ["ConstantMatrix", 2, ["Rational", 2, 3]], "matrix(2x2; 2/3, 2/3, 2/3, 2/3)", None),
+        ("constant-matrix-rank", ["Rank", ["ConstantMatrix", 3, ["Rational", 2, 3]]], "1", None),
+        ("zero-matrix", ["ZeroMatrix", 2, 3], "matrix(2x3; 0, 0, 0, 0, 0, 0)", None),
+        ("zero-matrix-transpose", ["Transpose", ["ZeroMatrix", 2, 3]], "matrix(3x2; 0, 0, 0, 0, 0, 0)", None),
         ("identity-one", ["IdentityMatrix", 1], "matrix(1x1; 1)", None),
         ("identity-three", ["IdentityMatrix", 3], "matrix(3x3; 1, 0, 0, 0, 1, 0, 0, 0, 1)", None),
         ("vector-tensor", ["VectorTensor", vector_left, vector_right], "matrix(1x6; 3/2, 1/3, 3, 6, 4/3, 12)", None),
@@ -168,7 +182,7 @@ def main():
             assert restored == json.loads(before.read_text(encoding="utf-8")), name
             if name == "application":
                 assert restored["expression"] == function
-            if name in {"trace", "row-count", "column-count"} or name.startswith(("rank-", "selector", "vector-selector", "scalar-product-", "vector-product", "outer-product", "matrix-tensor", "vector-tensor", "identity-")):
+            if name in {"trace", "row-count", "column-count"} or name.startswith(("rank-", "selector", "vector-selector", "scalar-product-", "vector-product", "outer-product", "matrix-tensor", "vector-tensor", "identity-", "zero-matrix", "constant-matrix", "diagonal-matrix", "scalar-matrix")):
                 assert restored["expression"][0] == expression[0], name
             cell = snapshot["cells"][0]
             assert cell["result_text"] == result, (name, cell["result_text"])

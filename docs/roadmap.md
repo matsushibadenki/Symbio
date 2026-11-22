@@ -72,6 +72,11 @@
 - 🟢 [Done] OpenMathの matrix_tensor とMathJSONのMatrixTensorを往復変換。異なる形状、引数交換、3因子の形状と全有理数成分をSymPyと照合。
 - 🟢 [Done] OpenMathの vector_tensor とMathJSONのVectorTensorを往復変換。異なる長さ、引数交換、3因子の厳密な全成分をSymPyと照合。
 - 🟢 [Done] OpenMathの linalg5.identity とMathJSONのIdentityMatrixを往復変換。次数の保持、形状・全成分のSymPy照合、不正な次数の拒否を検証。
+- 🟢 [Done] OpenMathの linalg5.zero とMathJSONのZeroMatrixを相互変換。長方形の寸法順を保持し、転置を含む結果の形状・全成分をSymPyと照合。
+- 🟢 [Done] OpenMathの linalg5.constant とMathJSONのConstantMatrixを往復変換。有理数で埋めた行列の全成分と階数をSymPyと照合。
+- 🟢 [Done] OpenMathの linalg5.diagonal_matrix とMathJSONのDiagonalMatrixを相互変換。対角成分の順序を保持し、厳密な全成分と行列式をSymPyと照合。
+- 🟢 [Done] OpenMathの linalg5.scalar とMathJSONのScalarMatrixを往復変換。有理数を対角に置く行列の全成分と行列式をSymPyと照合。
+- 🟢 [Done] 負の数値リテラルが交換を繰り返しても余分な乗算へ展開されないよう修正。負の有理数を含むスカラー行列と行列のスカラー除算をSymPyと照合。
 - 🟠 [Next] OpenMathの残る行列演算・追加辞書と外部CAS検証の拡充。標準ライブラリ全体の対応は未完了。
 - 🔴 [Later] 開いている全文書のセッション復元・一括保存・クラッシュ回復。
 

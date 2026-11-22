@@ -122,8 +122,12 @@ impl Parser<'_> {
             }
             Token::Op('-') => {
                 let b = self.expression(5, depth + 1)?;
-                let a = self.graph.number(-1)?;
-                self.graph.intern(Node::Mul(a, b))?
+                if let Some(value) = self.graph.value(b) {
+                    self.graph.rat(-value)?
+                } else {
+                    let a = self.graph.number(-1)?;
+                    self.graph.intern(Node::Mul(a, b))?
+                }
             }
             Token::Op('+') => self.expression(5, depth + 1)?,
             _ => return Err(Error::Parse(self.pos)),

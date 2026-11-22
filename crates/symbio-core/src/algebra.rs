@@ -69,6 +69,50 @@ pub fn simplify(g: &mut Graph, root: Id, a: &Assumptions) -> Result<Id> {
         }
         let result = match n {
             Node::Number(_) | Node::Symbol(_) => id,
+            Node::DiagonalMatrix(..) => {
+                let order = out.len();
+                let zero = g.number(0)?;
+                let mut entries = vec![zero; order * order];
+                for (i, value) in out.into_iter().enumerate() {
+                    entries[i * (order + 1)] = value;
+                }
+                g.intern(Node::Matrix {
+                    rows: order,
+                    cols: order,
+                    entries,
+                })?
+            }
+            Node::ScalarMatrix(order, _) => {
+                let order = crate::structured::matrix_dimension(g, order)?;
+                let zero = g.number(0)?;
+                let mut entries = vec![zero; order * order];
+                for i in 0..order {
+                    entries[i * (order + 1)] = out[1];
+                }
+                g.intern(Node::Matrix {
+                    rows: order,
+                    cols: order,
+                    entries,
+                })?
+            }
+            Node::ConstantMatrix(order, _) => {
+                let order = crate::structured::matrix_dimension(g, order)?;
+                g.intern(Node::Matrix {
+                    rows: order,
+                    cols: order,
+                    entries: vec![out[1]; order * order],
+                })?
+            }
+            Node::ZeroMatrix(rows, cols) => {
+                let rows = crate::structured::matrix_dimension(g, rows)?;
+                let cols = crate::structured::matrix_dimension(g, cols)?;
+                let zero = g.number(0)?;
+                g.intern(Node::Matrix {
+                    rows,
+                    cols,
+                    entries: vec![zero; rows * cols],
+                })?
+            }
             Node::MatrixTensor(..) | Node::VectorTensor(..) => {
                 let mut result = out[0];
                 for &operand in &out[1..] {
@@ -176,7 +220,7 @@ pub fn simplify(g: &mut Graph, root: Id, a: &Assumptions) -> Result<Id> {
             }
             Node::Apply(name, _) => g.intern(Node::Apply(name, out))?,
             Node::Call(f, order) if f == "identity" => {
-                let order = crate::structured::identity_order(g, order)?;
+                let order = crate::structured::matrix_dimension(g, order)?;
                 let zero = g.number(0)?;
                 let one = g.number(1)?;
                 let mut entries = vec![zero; order * order];
@@ -586,6 +630,10 @@ pub fn dimension(
         Node::ScalarProduct(..)
         | Node::VectorProduct(..)
         | Node::OuterProduct(..)
+        | Node::DiagonalMatrix(..)
+        | Node::ScalarMatrix(..)
+        | Node::ConstantMatrix(..)
+        | Node::ZeroMatrix(..)
         | Node::MatrixTensor(..)
         | Node::VectorTensor(..)
         | Node::VectorSelector(..)
