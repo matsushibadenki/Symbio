@@ -60,6 +60,7 @@ def evaluate_matrix_xml(document, cas):
             ("linalg1", "vector_selector"): lambda index, vector: vector[0, int(index) - 1],
             ("linalg1", "matrix_selector"): lambda row, col, a: a[int(row) - 1, int(col) - 1],
             ("linalg1", "determinant"): lambda a: a.det(),
+            ("linalg4", "size"): lambda vector: len(vector),
             ("linalg4", "rank"): lambda a: a.rank(),
             ("linalg4", "rowcount"): lambda a: a.rows,
             ("linalg4", "columncount"): lambda a: a.cols,
@@ -132,6 +133,13 @@ def main():
         ("vector-product-dimension", ["VectorProduct", ["Vector", 1, 2], ["Vector", 3, 4]], None, "domain_error"),
         ("scalar-product-vectors", ["ScalarProduct", ["Vector", ["Rational", 1, 2], ["Rational", 2, 3]], ["Vector", 3, 3]], "7/2", None),
         ("scalar-product-mismatch", ["ScalarProduct", ["Vector", 1, 2], ["Vector", 3]], None, "domain_error"),
+        ("scalar-product-tensor-left", ["ScalarProduct", ["VectorTensor", vector_left, vector_right], ["Vector", 0, 0, 0, 0, 1, 0]], "4/3", None),
+        ("scalar-product-tensor-right", ["ScalarProduct", ["Vector", 0, 0, 0, 0, 1, 0], ["VectorTensor", vector_left, vector_right]], "4/3", None),
+        ("scalar-product-tensor-both", ["ScalarProduct", ["VectorTensor", ["Vector", 1, 2], ["Vector", 3]], ["VectorTensor", ["Vector", 4], ["Vector", 5, 6]]], "204", None),
+        ("scalar-product-tensor-mismatch", ["ScalarProduct", ["VectorTensor", vector_left, vector_right], ["Vector", 1]], None, "domain_error"),
+        ("vector-size-tensor", ["VectorSize", ["VectorTensor", vector_left, vector_right]], "6", None),
+        ("vector-selector-tensor", ["VectorSelector", 5, ["VectorTensor", vector_left, vector_right]], "4/3", None),
+        ("vector-selector-tensor-outside", ["VectorSelector", 7, ["VectorTensor", vector_left, vector_right]], None, "domain_error"),
         ("vector-selector", ["VectorSelector", 2, ["Vector", 7, ["Rational", 2, 3], 4]], "2/3", None),
         ("vector-selector-outside", ["VectorSelector", 4, ["Vector", 7, 8, 9]], None, "domain_error"),
         ("selector", ["MatrixSelector", 2, 1, ["Transpose", matrix([1, ["Rational", 2, 3], 4])]], "2/3", None),
@@ -182,7 +190,7 @@ def main():
             assert restored == json.loads(before.read_text(encoding="utf-8")), name
             if name == "application":
                 assert restored["expression"] == function
-            if name in {"trace", "row-count", "column-count"} or name.startswith(("rank-", "selector", "vector-selector", "scalar-product-", "vector-product", "outer-product", "matrix-tensor", "vector-tensor", "identity-", "zero-matrix", "constant-matrix", "diagonal-matrix", "scalar-matrix")):
+            if name in {"trace", "row-count", "column-count"} or name.startswith(("rank-", "selector", "vector-selector", "vector-size-", "scalar-product-", "vector-product", "outer-product", "matrix-tensor", "vector-tensor", "identity-", "zero-matrix", "constant-matrix", "diagonal-matrix", "scalar-matrix")):
                 assert restored["expression"][0] == expression[0], name
             cell = snapshot["cells"][0]
             assert cell["result_text"] == result, (name, cell["result_text"])
@@ -195,11 +203,11 @@ def main():
                 except (NonInvertibleMatrixError, ZeroDivisionError, IndexError, ShapeError) as exc:
                     cas_result, cas_error = None, type(exc).__name__
                 assert cas_result == cell["result_text"], (name, cas_result, cell)
-                if name in {"scalar-product-mismatch", "vector-product-dimension"}:
+                if name in {"scalar-product-mismatch", "scalar-product-tensor-mismatch", "vector-product-dimension"}:
                     assert cas_error == "ShapeError", cas_error
                 elif name == "singular":
                     assert cas_error == "NonInvertibleMatrixError", cas_error
-                elif name.startswith("selector-") or name == "vector-selector-outside":
+                elif name.startswith("selector-") or (name.startswith("vector-selector-") and name.endswith("-outside")):
                     assert cas_error == "IndexError", cas_error
                 elif name == "zero-division":
                     assert cas_error in {"non-finite entries", "ZeroDivisionError"}, cas_error

@@ -10,6 +10,22 @@ pub type Rational = BigRational;
 pub const MAX_NODES: usize = 16000;
 pub const MAX_SOLUTIONS: usize = 32;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum VectorOperand {
+    Entries(Vec<Id>),
+    Tensor(Id),
+}
+
+impl VectorOperand {
+    pub(crate) fn children(&self) -> &[Id] {
+        match self {
+            Self::Entries(entries) => entries,
+            Self::Tensor(id) => std::slice::from_ref(id),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(
     tag = "op",
     content = "args",
@@ -33,7 +49,11 @@ pub enum Node {
     Apply(String, Vec<Id>),
     MatrixSelector([Id; 3]),
     VectorSelector(Id, Vec<Id>),
+    VectorTensorSelector(Id, Id),
+    VectorSize(Vec<Id>),
+    VectorTensorSize(Id),
     ScalarProduct(Vec<Id>, Vec<Id>),
+    TensorScalarProduct(VectorOperand, VectorOperand),
     VectorProduct(Vec<Id>, Vec<Id>),
     OuterProduct(Vec<Id>, Vec<Id>),
     MatrixTensor(Vec<Id>),
@@ -81,6 +101,7 @@ impl Node {
             | Self::Pow(a, b)
             | Self::ConstantMatrix(a, b)
             | Self::ScalarMatrix(a, b)
+            | Self::VectorTensorSelector(a, b)
             | Self::ZeroMatrix(a, b)
             | Self::Equation(a, b) => vec![*a, *b],
             Self::Call(_, a) | Self::Derivative { body: a, .. } => vec![*a],
@@ -96,6 +117,14 @@ impl Node {
             Self::ScalarProduct(left, right)
             | Self::VectorProduct(left, right)
             | Self::OuterProduct(left, right) => left.iter().chain(right).copied().collect(),
+            Self::TensorScalarProduct(left, right) => left
+                .children()
+                .iter()
+                .chain(right.children())
+                .copied()
+                .collect(),
+            Self::VectorTensorSize(vector) => vec![*vector],
+            Self::VectorSize(entries) => entries.clone(),
             Self::VectorSelector(index, entries) => std::iter::once(*index)
                 .chain(entries.iter().copied())
                 .collect(),
@@ -185,12 +214,31 @@ impl Graph {
                 {
                     return Err(Error::Limit);
                 }
+                Node::TensorScalarProduct(left, right) => {
+                    for operand in [left, right] {
+                        match operand {
+                            VectorOperand::Entries(entries) if entries.len() > 32 => {
+                                return Err(Error::Limit);
+                            }
+                            VectorOperand::Tensor(id)
+                                if !matches!(self.nodes.get(*id), Some(Node::VectorTensor(..))) =>
+                            {
+                                return Err(Error::Invalid("vector tensor operand".into()));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
                 Node::MatrixTensor(args) | Node::VectorTensor(args)
                     if !(2..=32).contains(&args.len()) =>
                 {
                     return Err(Error::Limit);
                 }
-                Node::VectorSelector(_, entries) if entries.len() > 32 => return Err(Error::Limit),
+                Node::VectorSize(entries) | Node::VectorSelector(_, entries)
+                    if entries.len() > 32 =>
+                {
+                    return Err(Error::Limit);
+                }
                 Node::Apply(name, args) if !valid_symbol(name) || args.len() > 32 => {
                     return Err(Error::Invalid("function application".into()));
                 }
@@ -465,6 +513,10 @@ impl Graph {
             | Node::ZeroMatrix(..)
             | Node::MatrixTensor(..)
             | Node::VectorTensor(..)
+            | Node::TensorScalarProduct(..)
+            | Node::VectorTensorSize(..)
+            | Node::VectorSize(..)
+            | Node::VectorTensorSelector(..)
             | Node::VectorSelector(..)
             | Node::MatrixSelector(..)
             | Node::Apply(..) => self.format(id, true, depth)?,
@@ -582,6 +634,33 @@ impl Graph {
                     n.clone()
                 }
             }
+            Node::TensorScalarProduct(left, right) => {
+                let vector = |operand: &VectorOperand| -> Result<String> {
+                    match operand {
+                        VectorOperand::Tensor(id) => f(*id),
+                        VectorOperand::Entries(entries) => {
+                            let items = entries
+                                .iter()
+                                .map(|id| f(*id))
+                                .collect::<Result<Vec<_>>>()?;
+                            Ok(if math {
+                                format!(
+                                    "<mrow><mo>(</mo>{}<mo>)</mo></mrow>",
+                                    items.join("<mo>,</mo>")
+                                )
+                            } else {
+                                format!("[{}]", items.join(", "))
+                            })
+                        }
+                    }
+                };
+                let (left, right) = (vector(left)?, vector(right)?);
+                if math {
+                    format!("<mrow>{left}<mo>·</mo>{right}</mrow>")
+                } else {
+                    format!("scalarproduct({left}, {right})")
+                }
+            }
             Node::ScalarProduct(left, right)
             | Node::VectorProduct(left, right)
             | Node::OuterProduct(left, right) => {
@@ -665,6 +744,36 @@ impl Graph {
                         },
                         args.join(", ")
                     )
+                }
+            }
+            Node::VectorTensorSize(vector) => {
+                let vector = f(*vector)?;
+                if math {
+                    format!("<mrow><mi>size</mi><mo>(</mo>{vector}<mo>)</mo></mrow>")
+                } else {
+                    format!("vectorsize({vector})")
+                }
+            }
+            Node::VectorSize(entries) => {
+                let entries = entries
+                    .iter()
+                    .map(|entry| f(*entry))
+                    .collect::<Result<Vec<_>>>()?;
+                if math {
+                    format!(
+                        "<mrow><mi>size</mi><mo>(</mo><mo>[</mo>{}<mo>]</mo><mo>)</mo></mrow>",
+                        entries.join("<mo>,</mo>")
+                    )
+                } else {
+                    format!("vectorsize([{}])", entries.join(", "))
+                }
+            }
+            Node::VectorTensorSelector(index, vector) => {
+                let (index, vector) = (f(*index)?, f(*vector)?);
+                if math {
+                    format!("<mrow><mo>(</mo>{vector}<mo>)</mo><mo>[</mo>{index}<mo>]</mo></mrow>")
+                } else {
+                    format!("vectorselector({index}, {vector})")
                 }
             }
             Node::VectorSelector(index, entries) => {

@@ -37,6 +37,7 @@ Mappings follow the [OpenMath XML standard](https://openmath.org/standard/om20-2
 | `arith1.power(matrix, -1)` | Inverse of a square matrix, exchanged as MathJSON `Inverse`. Singular matrices retain the definition and report a domain error. |
 | `arith1.power(matrix, exponent)` | Powers of square matrices. The kernel evaluates integer exponents from −16 to 16, including zero. |
 | `linalg4.rowcount`, `linalg4.columncount` | Exact row and column counts of a matrix |
+| `linalg4.size` | Exact number of entries in an explicit vector of up to 32 scalar entries or in a vector tensor expression. |
 | `linalg4.rank` | Exact rank of a rectangular matrix with rational entries |
 | `symbio_linalg1.trace` | Sum of the diagonal entries of a square matrix. Requires the [Symbio dictionary](openmath-cd/symbio_linalg1.ocd) and its explicit `urn:symbio:cd` base. |
 | `linalg5.diagonal_matrix` | Square matrix with 1–8 ordered scalar diagonal entries and zeros elsewhere. |
@@ -44,12 +45,12 @@ Mappings follow the [OpenMath XML standard](https://openmath.org/standard/om20-2
 | `linalg5.constant(n, value)` | Square matrix of order 1–8 with the same scalar in every entry. |
 | `linalg5.zero(rows, columns)` | Exact rectangular zero matrix. Both dimensions are integers from 1 to 8. |
 | `linalg5.identity(n)` | Exact square identity matrix of order 1–8. Invalid orders produce a domain error at import. |
-| `linalg6.vector_tensor` | Ordered Kronecker product of 2–32 explicit row vectors. The result is displayed as a single row of up to 8 entries. |
+| `linalg6.vector_tensor` | Ordered Kronecker product of 2–32 explicit row vectors or nested vector tensor expressions. The result is displayed as a single row of up to 8 entries. |
 | `linalg6.matrix_tensor` | Ordered matrix Kronecker product using SymPy block order. Accepts 2–32 operands, with each result dimension limited to 8. |
-| `linalg1.outerproduct(left, right)` | Matrix with entries `left[i] * right[j]`. Explicit vector lengths may differ and each must be 1–8. |
-| `linalg1.vectorproduct(left, right)` | Ordered cross product of two explicit three-component `linalg2.vector` operands. Symbio displays the result as a 1×3 row. |
-| `linalg1.scalarproduct(left, right)` | Dot product of two equal-length explicit `linalg2.vector` operands, up to 32 scalar entries each. Different lengths produce a domain error. |
-| `linalg1.vector_selector(index, vector)` | Exact entry from an explicit `linalg2.vector` with up to 32 scalar entries, using a one-based integer index |
+| `linalg1.outerproduct(left, right)` | Matrix with entries `left[i] * right[j]`. Imports explicit row or column vectors. Vector lengths may differ and each must be 1–8. |
+| `linalg1.vectorproduct(left, right)` | Ordered cross product of two explicit three-component row or column vector operands. Symbio displays the result as a 1×3 row. |
+| `linalg1.scalarproduct(left, right)` | Dot product of two equal-length explicit vectors, up to 32 scalar entries each. Import accepts `linalg2.vector` and `linalg3.vector`. Export uses `linalg2.vector`. Different lengths produce a domain error. |
+| `linalg1.vector_selector(index, vector)` | Exact entry at a one-based integer index. Accepts up to 32 scalar entries in `linalg2.vector`, `linalg3.vector`, or `linalg2.matrixrow`. Export uses `linalg2.vector`. |
 | `linalg1.matrix_selector(row, column, matrix)` | Exact matrix entry at one-based integer indices. Out-of-range indices report a domain error. |
 | `linalg1.transpose` | Transpose of a rectangular matrix |
 | `linalg3.matrix` with `matrixcolumn` children | Column-oriented input converted to the same row-oriented SEG matrix |
@@ -104,7 +105,7 @@ Named symbolic calls use an `OMA` headed by an `OMV`, with up to 32 ordered scal
 
 ## External codec interoperability
 
-`scripts/check-openmath-interop.py` exercises 49 cases through [py-openmath 0.3.0](https://github.com/OpenMath/py-openmath). It compares the authored MathJSON expression and context before and after Symbio XML export, external decoding and encoding, and Symbio reimport. Expected exact matrix results and domain errors are checked in Symbio. The application test also compares the function names, ordered arguments and nesting against the original MathJSON. py-openmath provides the independent XML codec. Symbio performs the evaluation.
+`scripts/check-openmath-interop.py` exercises 56 cases through [py-openmath 0.3.0](https://github.com/OpenMath/py-openmath). It compares the authored MathJSON expression and context before and after Symbio XML export, external decoding and encoding, and Symbio reimport. Expected exact matrix results and domain errors are checked in Symbio. The application test also compares the function names, ordered arguments and nesting against the original MathJSON. py-openmath provides the independent XML codec. Symbio performs the evaluation.
 
 ```sh
 python3 -m venv /tmp/symbio-openmath-venv
@@ -114,7 +115,7 @@ python3 -m venv /tmp/symbio-openmath-venv
 
 ## External CAS comparison
 
-Run the same check with `--sympy` after installing `sympy==1.14.0` in the test environment. The test translates the OpenMath objects decoded by py-openmath into SymPy integers, rationals and matrices. Both CAS engines evaluate the same serialized expression. Forty-one successful linear algebra cases matched exactly, including the matrix product, inverse, exponent −2 scalar division by 3, rational trace, and rectangular, rank-deficient and zero-matrix ranks. For singularity and zero division, SymPy raised `NonInvertibleMatrixError` on the singular inverse and returned non-finite matrix entries on zero division. Symbio reported `domain_error` with no result in both cases. For indices beyond the last row or column, SymPy raised `IndexError` and Symbio reported `domain_error`.
+Run the same check with `--sympy` after installing `sympy==1.14.0` in the test environment. The test translates the OpenMath objects decoded by py-openmath into SymPy integers, rationals and matrices. Both CAS engines evaluate the same serialized expression. The comparison covers 55 linear algebra cases. Successful results matched exactly, including the matrix product, inverse, exponent −2 scalar division by 3, rational trace, and rectangular, rank-deficient and zero-matrix ranks. For singularity and zero division, SymPy raised `NonInvertibleMatrixError` on the singular inverse and returned non-finite matrix entries on zero division. Symbio reported `domain_error` with no result in both cases. For indices beyond the last row or column, SymPy raised `IndexError` and Symbio reported `domain_error`.
 
 ```sh
 /tmp/symbio-openmath-venv/bin/python -m pip install sympy==1.14.0
@@ -132,3 +133,11 @@ For `linalg6.matrix_tensor(A, B)`, Symbio uses the block convention in which blo
 The vector tensor fixtures compare both orders of a two-entry and a three-entry vector plus a three-factor product. The checks compare every exact component and the full result length.
 
 Signed-value fixtures check a scalar matrix with diagonal entries of `-2/3` and exact division of a matrix containing a negative element. The comparisons check the authored form across the exchange and the resulting exact values.
+
+Cross and outer product operands accept `linalg2.vector` and `linalg3.vector` on import. Export writes both operands as `linalg2.vector` in their original order.
+
+Import also accepts the [linalg2col dictionary](https://openmath.org/cd/linalg2col.html) for matrices with matching matrixcolumn constructors and for column vector operands of the selector, dot, cross and outer products. Export uses row-oriented linalg2 constructors. Mixed dictionaries inside one matrix constructor are rejected.
+
+The operand of `linalg1.vector_selector` can also be an ordered `linalg6.vector_tensor` expression. The one-based index is checked against the evaluated product length. Exchange preserves both the index and the tensor expression.
+
+Either operand of `linalg1.scalarproduct` can be a `linalg6.vector_tensor` expression. The exchange preserves operand order and tensor factors. The exact dot product uses the evaluated vectors and reports a domain error if their lengths differ.

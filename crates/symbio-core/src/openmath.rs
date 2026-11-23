@@ -238,9 +238,40 @@ const MAPPINGS: &[(&str, &str, &str)] = &[
     ("linalg5", "diagonal_matrix", "DiagonalMatrix"),
     ("linalg2", "vector", "Vector"),
     ("linalg4", "rank", "Rank"),
+    ("linalg4", "size", "VectorSize"),
     ("linalg4", "rowcount", "RowCount"),
     ("linalg4", "columncount", "ColumnCount"),
 ];
+fn decode_vector_or_tensor(vector: &Element, allow_matrix_row: bool) -> Result<Value> {
+    if vector.name == "OMA"
+        && vector
+            .children
+            .first()
+            .is_some_and(|head| head.symbol().ok() == Some(("linalg6", "vector_tensor")))
+    {
+        decode(vector)
+    } else {
+        decode_vector(vector, allow_matrix_row)
+    }
+}
+
+fn decode_vector(vector: &Element, allow_matrix_row: bool) -> Result<Value> {
+    vector.check("OMA", &[], false)?;
+    let constructor = vector.children.first().ok_or_else(unsupported)?;
+    let (cd, name) = constructor.symbol()?;
+    if !(matches!((cd, name), ("linalg2" | "linalg3" | "linalg2col", "vector"))
+        || allow_matrix_row && (cd, name) == ("linalg2", "matrixrow"))
+    {
+        return Err(unsupported());
+    }
+    official(constructor, cd, name)?;
+    let mut entries = vec![json!("Vector")];
+    for entry in &vector.children[1..] {
+        entries.push(decode(entry)?);
+    }
+    Ok(Value::Array(entries))
+}
+
 fn decode(e: &Element) -> Result<Value> {
     match e.name.as_str() {
         "OMI" => {
@@ -351,8 +382,8 @@ fn decode(e: &Element) -> Result<Value> {
                     ]
                 ]));
             }
-            if matches!(cd, "linalg2" | "linalg3") && name == "matrix" {
-                let column_major = cd == "linalg3";
+            if matches!(cd, "linalg2" | "linalg3" | "linalg2col") && name == "matrix" {
+                let column_major = cd != "linalg2";
                 let mut rows = vec![json!("List")];
                 for row in &e.children[1..] {
                     row.check("OMA", &[], false)?;
@@ -394,6 +425,42 @@ fn decode(e: &Element) -> Result<Value> {
                     return Ok(Value::Array(converted));
                 }
                 return Ok(Value::Array(rows));
+            }
+            if (cd, name) == ("linalg4", "size") {
+                let args = application(e, cd, name, 1)?;
+                return Ok(json!([
+                    "VectorSize",
+                    decode_vector_or_tensor(&args[0], false)?
+                ]));
+            }
+            if (cd, name) == ("linalg1", "vector_selector") {
+                let args = application(e, cd, name, 2)?;
+                return Ok(json!([
+                    "VectorSelector",
+                    decode(&args[0])?,
+                    decode_vector_or_tensor(&args[1], true)?
+                ]));
+            }
+            let vector_product = match (cd, name) {
+                ("linalg1", "scalarproduct") => Some("ScalarProduct"),
+                ("linalg1", "vectorproduct") => Some("VectorProduct"),
+                ("linalg1", "outerproduct") => Some("OuterProduct"),
+                _ => None,
+            };
+            if let Some(head) = vector_product {
+                let args = application(e, cd, name, 2)?;
+                let decode_operand = |operand| {
+                    if head == "ScalarProduct" {
+                        decode_vector_or_tensor(operand, false)
+                    } else {
+                        decode_vector(operand, false)
+                    }
+                };
+                return Ok(json!([
+                    head,
+                    decode_operand(&args[0])?,
+                    decode_operand(&args[1])?
+                ]));
             }
             let head = if (cd, name) == ("arith1", "root") {
                 if e.children.len() != 3 || decode(&e.children[2])? != json!({"num":"2"}) {

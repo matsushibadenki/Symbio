@@ -76,7 +76,7 @@ Named symbolic applications can be exchanged as `["Apply", {"sym":"f"}, "x"]`. T
 
 `["VectorSelector", index, ["Vector", ...entries]]` selects a scalar entry from an explicit vector of up to 32 entries. Indices are one-based integers. OpenMath exchange preserves the selector, index and entries. Invalid indices produce a domain error.
 
-`["ScalarProduct", ["Vector", ...left], ["Vector", ...right]]` computes the sum of pairwise products. OpenMath exchange preserves the operand order and entries. Each explicit vector can contain up to 32 scalar entries. Different lengths produce a domain error.
+`["ScalarProduct", ["Vector", ...left], ["Vector", ...right]]` computes the sum of pairwise products. Either or both operands can also be a `VectorTensor` expression. OpenMath exchange preserves the operand order and entries. Each explicit vector can contain up to 32 scalar entries. Different lengths produce a domain error.
 
 `["VectorProduct", ["Vector", ...left], ["Vector", ...right]]` preserves the operand order for a three-dimensional cross product. The kernel displays the three result components as a row matrix. Other operand lengths yield a domain error.
 
@@ -95,3 +95,11 @@ Named symbolic applications can be exchanged as `["Apply", {"sym":"f"}, "x"]`. T
 `["DiagonalMatrix", a, b, ...]` constructs a square matrix from 1–8 ordered diagonal entries. It preserves the constructor and entry order during OpenMath exchange.
 
 `["ScalarMatrix", n, value]` constructs a scalar multiple of the identity of order 1–8 and preserves the constructor and both arguments during OpenMath exchange.
+
+`["VectorSize", ["Vector", ...entries]]` returns the number of entries as an exact integer. The vector expression and entry order are preserved during OpenMath exchange.
+
+A `VectorTensor` operand may itself be a `VectorTensor`. The grouping and factor order survive exchange, and the result length remains limited to 8.
+
+`VectorSelector` also accepts a `VectorTensor` as its vector operand and checks the index against the result length.
+
+`["VectorSize", ["VectorTensor", ...factors]]` returns the exact product length and preserves the factor order during OpenMath exchange.

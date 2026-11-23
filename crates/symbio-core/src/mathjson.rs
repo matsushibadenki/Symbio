@@ -1,6 +1,6 @@
 //! Strict MathJSON subset. Context envelopes retain assumptions; bare expressions have none.
 use crate::{
-    graph::{Graph, Id, Node},
+    graph::{Graph, Id, Node, VectorOperand},
     *,
 };
 use serde::{Deserialize, Serialize};
@@ -194,9 +194,15 @@ pub fn decode(g: &mut Graph, v: &Value) -> Result<Id> {
             }
             let mut operands = Vec::with_capacity(args.len());
             for arg in args {
-                let vector = head(arg)
-                    .filter(|items| items.first() == Some(&json!("Vector")))
-                    .ok_or_else(unsupported)?;
+                let vector = head(arg).ok_or_else(unsupported)?;
+                match vector.first().and_then(Value::as_str) {
+                    Some("VectorTensor") => {
+                        operands.push(go(g, arg, depth + 1, budget)?);
+                        continue;
+                    }
+                    Some("Vector") => {}
+                    _ => return Err(unsupported()),
+                }
                 let cols = vector.len() - 1;
                 if !(1..=8).contains(&cols) {
                     return Err(Error::Limit);
@@ -227,42 +233,71 @@ pub fn decode(g: &mut Graph, v: &Value) -> Result<Id> {
             let [left, right] = args else {
                 return Err(unsupported());
             };
-            let mut vector = |value| -> Result<Vec<Id>> {
+            let is_tensor = |value| {
+                head(value).and_then(|items| items.first()?.as_str()) == Some("VectorTensor")
+            };
+            let mut vector = |value| -> Result<VectorOperand> {
+                if f == "ScalarProduct" && is_tensor(value) {
+                    return Ok(VectorOperand::Tensor(go(g, value, depth + 1, budget)?));
+                }
                 let entries = head(value)
                     .filter(|items| items.first() == Some(&json!("Vector")))
                     .ok_or_else(unsupported)?;
                 if entries.len() > 33 {
                     return Err(Error::Limit);
                 }
-                entries[1..]
-                    .iter()
-                    .map(|entry| go(g, entry, depth + 1, budget))
-                    .collect()
+                Ok(VectorOperand::Entries(
+                    entries[1..]
+                        .iter()
+                        .map(|entry| go(g, entry, depth + 1, budget))
+                        .collect::<Result<Vec<_>>>()?,
+                ))
             };
             let left = vector(left)?;
             let right = vector(right)?;
+            let (left, right) = match (left, right) {
+                (VectorOperand::Entries(left), VectorOperand::Entries(right)) => (left, right),
+                (left, right) => return g.intern(Node::TensorScalarProduct(left, right)),
+            };
             return g.intern(match f {
                 "OuterProduct" => Node::OuterProduct(left, right),
                 "VectorProduct" => Node::VectorProduct(left, right),
                 _ => Node::ScalarProduct(left, right),
             });
         }
-        if f == "VectorSelector" {
-            let [index, vector] = args else {
-                return Err(unsupported());
+        if matches!(f, "VectorSelector" | "VectorSize") {
+            let (index, vector) = match (f, args) {
+                ("VectorSelector", [index, vector]) => (Some(index), vector),
+                ("VectorSize", [vector]) => (None, vector),
+                _ => return Err(unsupported()),
             };
+            if head(vector).and_then(|items| items.first()?.as_str()) == Some("VectorTensor") {
+                let vector = go(g, vector, depth + 1, budget)?;
+                return match index {
+                    Some(index) => {
+                        let index = go(g, index, depth + 1, budget)?;
+                        g.intern(Node::VectorTensorSelector(index, vector))
+                    }
+                    None => g.intern(Node::VectorTensorSize(vector)),
+                };
+            }
             let vector = head(vector)
                 .filter(|items| items.first() == Some(&json!("Vector")))
                 .ok_or_else(unsupported)?;
             if vector.len() > 33 {
                 return Err(Error::Limit);
             }
-            let index = go(g, index, depth + 1, budget)?;
+            let index = index
+                .map(|index| go(g, index, depth + 1, budget))
+                .transpose()?;
             let entries = vector[1..]
                 .iter()
                 .map(|entry| go(g, entry, depth + 1, budget))
                 .collect::<Result<Vec<_>>>()?;
-            return g.intern(Node::VectorSelector(index, entries));
+            return g.intern(match index {
+                Some(index) => Node::VectorSelector(index, entries),
+                None => Node::VectorSize(entries),
+            });
         }
         if f == "MatrixSelector" {
             let [row, column, matrix] = args else {
@@ -547,6 +582,21 @@ pub fn encode(g: &Graph, root: Id) -> Result<Value> {
                     go(g, *y, depth + 1, budget)?
                 ])
             }
+            Node::TensorScalarProduct(left, right) => {
+                let mut vector = |operand: &VectorOperand| -> Result<Value> {
+                    match operand {
+                        VectorOperand::Tensor(id) => go(g, *id, depth + 1, budget),
+                        VectorOperand::Entries(entries) => {
+                            let mut vector = vec![json!("Vector")];
+                            for entry in entries {
+                                vector.push(go(g, *entry, depth + 1, budget)?);
+                            }
+                            Ok(Value::Array(vector))
+                        }
+                    }
+                };
+                json!(["ScalarProduct", vector(left)?, vector(right)?])
+            }
             Node::ScalarProduct(left, right)
             | Node::VectorProduct(left, right)
             | Node::OuterProduct(left, right) => {
@@ -592,6 +642,10 @@ pub fn encode(g: &Graph, root: Id) -> Result<Value> {
             Node::VectorTensor(args) => {
                 let mut expression = vec![json!("VectorTensor")];
                 for arg in args {
+                    if matches!(&g.nodes[*arg], Node::VectorTensor(..)) {
+                        expression.push(go(g, *arg, depth + 1, budget)?);
+                        continue;
+                    }
                     let Node::Matrix {
                         rows: 1, entries, ..
                     } = &g.nodes[*arg]
@@ -613,12 +667,25 @@ pub fn encode(g: &Graph, root: Id) -> Result<Value> {
                 }
                 Value::Array(expression)
             }
-            Node::VectorSelector(index, entries) => {
+            Node::VectorTensorSize(vector) => {
+                json!(["VectorSize", go(g, *vector, depth + 1, budget)?])
+            }
+            Node::VectorTensorSelector(index, vector) => json!([
+                "VectorSelector",
+                go(g, *index, depth + 1, budget)?,
+                go(g, *vector, depth + 1, budget)?
+            ]),
+            Node::VectorSize(entries) | Node::VectorSelector(_, entries) => {
                 let mut vector = vec![json!("Vector")];
                 for entry in entries {
                     vector.push(go(g, *entry, depth + 1, budget)?);
                 }
-                json!(["VectorSelector", go(g, *index, depth + 1, budget)?, vector])
+                match &g.nodes[id] {
+                    Node::VectorSelector(index, _) => {
+                        json!(["VectorSelector", go(g, *index, depth + 1, budget)?, vector])
+                    }
+                    _ => json!(["VectorSize", vector]),
+                }
             }
             Node::MatrixSelector([row, column, matrix]) => json!([
                 "MatrixSelector",

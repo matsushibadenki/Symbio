@@ -77,6 +77,15 @@
 - 🟢 [Done] OpenMathの linalg5.diagonal_matrix とMathJSONのDiagonalMatrixを相互変換。対角成分の順序を保持し、厳密な全成分と行列式をSymPyと照合。
 - 🟢 [Done] OpenMathの linalg5.scalar とMathJSONのScalarMatrixを往復変換。有理数を対角に置く行列の全成分と行列式をSymPyと照合。
 - 🟢 [Done] 負の数値リテラルが交換を繰り返しても余分な乗算へ展開されないよう修正。負の有理数を含むスカラー行列と行列のスカラー除算をSymPyと照合。
+- 🟢 [Done] OpenMathの vector_selector で列ベクトルと行列行を読み込み、1始まりの選択・有理数結果・範囲外エラーを検証。書き出しは linalg2.vector に統一。
+- 🟢 [Done] OpenMathの内積で列ベクトルを読み込み、MathJSON往復で左右の引数順、有理数の厳密結果、長さ不一致エラーを検証。
+- 🟢 [Done] OpenMathの外積とテンソル積（outer product）で列ベクトルを読み込み。行ベクトルとの混在、原式と引数順、厳密な全成分を検証。
+- 🟢 [Done] OpenMathの linalg2col に対応。列形式の行列と既存演算の列ベクトルを読み込み、長方形の向きと厳密結果をMathJSON往復で検証。
+- 🟢 [Done] OpenMathの linalg4.size とMathJSONのVectorSizeを相互変換。行・列ベクトルの要素数を厳密に計算し、往復で要素順を保持。
+- 🟢 [Done] ベクトルのテンソル積の入れ子をOpenMath／MathJSONで保持。有理数を含む結果と因子順を往復テストで検証。
+- 🟢 [Done] ベクトルのクロネッカー積をOpenMath／MathJSONの要素選択に接続し、原式と添字の往復、厳密な結果、範囲外エラーをSymPyと照合。
+- 🟢 [Done] linalg4.size／VectorSizeでベクトルのクロネッカー積の要素数を計算。往復で原式と因子順を保持し、SymPyと照合。
+- 🟢 [Done] linalg1.scalarproduct／ScalarProductの左右にベクトルのクロネッカー積を指定可能。原式と引数順、厳密な内積、長さ不一致エラーをSymPyと照合。
 - 🟠 [Next] OpenMathの残る行列演算・追加辞書と外部CAS検証の拡充。標準ライブラリ全体の対応は未完了。
 - 🔴 [Later] 開いている全文書のセッション復元・一括保存・クラッシュ回復。
 

@@ -759,3 +759,210 @@ fn identity_rejects_invalid_orders_in_both_formats() {
         ));
     }
 }
+
+#[test]
+fn vector_selector_accepts_columns_and_matrix_rows() {
+    for (cd, constructor) in [("linalg3", "vector"), ("linalg2", "matrixrow")] {
+        let body = format!(
+            r#"<OMA><OMS cd="linalg1" name="vector_selector"/><OMI>2</OMI><OMA><OMS cd="{cd}" name="{constructor}"/><OMI>7</OMI><OMA><OMS cd="nums1" name="rational"/><OMI>2</OMI><OMI>3</OMI></OMA></OMA></OMA>"#
+        );
+        let source = load(&body);
+        let copy = roundtrip(&source);
+        assert_eq!(copy.snapshot().cells[0].result_text.as_deref(), Some("2/3"));
+        let xml = String::from_utf8(export(copy.project(), 1).unwrap()).unwrap();
+        assert!(xml.contains(r#"<OMS cd="linalg2" name="vector"/>"#));
+        let outside = load(&body.replacen("<OMI>2</OMI>", "<OMI>3</OMI>", 1));
+        assert_eq!(
+            outside.snapshot().cells[0]
+                .cell
+                .calculation_error
+                .as_deref(),
+            Some("domain_error")
+        );
+    }
+}
+
+#[test]
+fn scalar_product_accepts_column_vectors_and_preserves_operand_order() {
+    use serde_json::json;
+
+    let body = r#"<OMA><OMS cd="linalg1" name="scalarproduct"/>
+      <OMA><OMS cd="linalg3" name="vector"/><OMI>1</OMI><OMA><OMS cd="nums1" name="rational"/><OMI>2</OMI><OMI>3</OMI></OMA></OMA>
+      <OMA><OMS cd="linalg3" name="vector"/><OMI>2</OMI><OMI>4</OMI></OMA></OMA>"#;
+    let app = load(body);
+    let copy = roundtrip(&app);
+    assert_eq!(
+        copy.snapshot().cells[0].result_text.as_deref(),
+        Some("14/3")
+    );
+    let expression = symbio_core::mathjson::export(copy.project(), 1)
+        .unwrap()
+        .expression;
+    assert_eq!(
+        expression,
+        json!(["ScalarProduct",
+            ["Vector", {"num":"1"}, ["Divide", {"num":"2"}, {"num":"3"}]],
+            ["Vector", {"num":"2"}, {"num":"4"}]
+        ])
+    );
+    let mismatched = load(&body.replace("<OMI>4</OMI>", ""));
+    assert_eq!(
+        mismatched.snapshot().cells[0]
+            .cell
+            .calculation_error
+            .as_deref(),
+        Some("domain_error")
+    );
+}
+
+#[test]
+fn cross_and_outer_products_accept_column_vector_operands() {
+    let column = r#"<OMA><OMS cd="linalg3" name="vector"/><OMA><OMS cd="nums1" name="rational"/><OMI>1</OMI><OMI>2</OMI></OMA><OMI>2</OMI><OMI>3</OMI></OMA>"#;
+    let row = r#"<OMA><OMS cd="linalg2" name="vector"/><OMI>4</OMI><OMI>5</OMI><OMI>6</OMI></OMA>"#;
+    let short = row.replace("<OMI>6</OMI>", "");
+    for (operator, head, right, result) in [
+        (
+            "vectorproduct",
+            "VectorProduct",
+            row,
+            "matrix(1x3; -3, 9, -11/2)",
+        ),
+        (
+            "outerproduct",
+            "OuterProduct",
+            short.as_str(),
+            "matrix(3x2; 2, 5/2, 8, 10, 12, 15)",
+        ),
+    ] {
+        let body = format!(r#"<OMA><OMS cd="linalg1" name="{operator}"/>{column}{right}</OMA>"#);
+        let copy = roundtrip(&load(&body));
+        assert_eq!(
+            copy.snapshot().cells[0].result_text.as_deref(),
+            Some(result)
+        );
+        let mathjson = symbio_core::mathjson::export(copy.project(), 1)
+            .unwrap()
+            .expression;
+        assert_eq!(mathjson[0], head);
+        assert_eq!(mathjson[1][1][0], "Divide");
+        assert_eq!(mathjson[2][1]["num"], "4");
+    }
+}
+
+#[test]
+fn linalg2col_matrix_and_vector_imports_roundtrip() {
+    let column = |top, bottom| {
+        format!(
+            r#"<OMA><OMS cd="linalg2col" name="matrixcolumn"/><OMI>{top}</OMI><OMI>{bottom}</OMI></OMA>"#
+        )
+    };
+    let matrix = format!(
+        r#"<OMA><OMS cd="linalg2col" name="matrix"/>{}{}{}</OMA>"#,
+        column(1, 4),
+        column(2, 5),
+        column(3, 6)
+    );
+    let body = format!(
+        r#"<OMA><OMS cd="linalg1" name="matrix_selector"/><OMI>2</OMI><OMI>3</OMI>{matrix}</OMA>"#
+    );
+    assert_eq!(
+        roundtrip(&load(&body)).snapshot().cells[0]
+            .result_text
+            .as_deref(),
+        Some("6")
+    );
+    let invalid = matrix.replacen(
+        r#"cd="linalg2col" name="matrixcolumn""#,
+        r#"cd="linalg3" name="matrixcolumn""#,
+        1,
+    );
+    assert!(import(object(&invalid).as_bytes()).is_err());
+
+    let vector = r#"<OMA><OMS cd="linalg2col" name="vector"/><OMI>2</OMI><OMI>3</OMI></OMA>"#;
+    let product = format!(r#"<OMA><OMS cd="linalg1" name="scalarproduct"/>{vector}{vector}</OMA>"#);
+    assert_eq!(
+        roundtrip(&load(&product)).snapshot().cells[0]
+            .result_text
+            .as_deref(),
+        Some("13")
+    );
+}
+
+#[test]
+fn vector_size_roundtrips_with_ordered_entries() {
+    use serde_json::json;
+    for cd in ["linalg2", "linalg3", "linalg2col"] {
+        let body = format!(
+            r#"<OMA><OMS cd="linalg4" name="size"/><OMA><OMS cd="{cd}" name="vector"/><OMI>7</OMI><OMV name="x"/><OMI>-2</OMI></OMA></OMA>"#
+        );
+        let copy = roundtrip(&load(&body));
+        assert_eq!(copy.snapshot().cells[0].result_text.as_deref(), Some("3"));
+        let encoded = symbio_core::mathjson::export(copy.project(), 1).unwrap();
+        assert_eq!(
+            encoded.expression,
+            json!(["VectorSize", ["Vector", {"num":"7"}, "x", {"num":"-2"}]])
+        );
+    }
+    assert!(
+        import(object(r#"<OMA><OMS cd="linalg4" name="size"/><OMI>3</OMI></OMA>"#).as_bytes())
+            .is_err()
+    );
+}
+
+#[test]
+fn nested_vector_tensor_preserves_grouping_and_operand_order() {
+    use serde_json::json;
+    let app = from_mathjson(json!([
+        "VectorTensor",
+        ["Vector", 2],
+        [
+            "VectorTensor",
+            ["Vector", ["Rational", 1, 2], 3],
+            ["Vector", 4, 5]
+        ]
+    ]));
+    let copy = roundtrip(&app);
+    assert_eq!(
+        copy.snapshot().cells[0].result_text.as_deref(),
+        Some("matrix(1x4; 4, 5, 24, 30)")
+    );
+    let expression = symbio_core::mathjson::export(copy.project(), 1)
+        .unwrap()
+        .expression;
+    assert_eq!(expression[1], json!(["Vector", {"num":"2"}]));
+    assert_eq!(
+        expression[2],
+        json!(["VectorTensor",
+            ["Vector", ["Divide", {"num":"1"}, {"num":"2"}], {"num":"3"}],
+            ["Vector", {"num":"4"}, {"num":"5"}]
+        ])
+    );
+}
+
+#[test]
+fn scalar_product_accepts_ordered_vector_tensor_operands() {
+    use serde_json::json;
+    let tensor = json!([
+        "VectorTensor",
+        ["Vector", ["Rational", 1, 2], 2],
+        ["Vector", 3, 4]
+    ]);
+    let vector = json!(["Vector", 0, 1, 0, 0]);
+    for (left, right, expected) in [
+        (tensor.clone(), vector.clone(), Some("2")),
+        (vector, tensor.clone(), Some("2")),
+        (tensor.clone(), tensor.clone(), Some("425/4")),
+        (tensor, json!(["Vector", 1, 2, 3, 4, 5, 6, 7, 8, 9]), None),
+    ] {
+        let source = from_mathjson(json!(["ScalarProduct", left, right]));
+        let copy = roundtrip(&source);
+        let snapshot = copy.snapshot();
+        assert_eq!(snapshot.cells[0].result_text.as_deref(), expected);
+        if expected.is_none() {
+            assert_eq!(
+                snapshot.cells[0].cell.calculation_error.as_deref(),
+                Some("domain_error")
+            );
+        }
+    }
+}

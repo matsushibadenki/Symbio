@@ -1,6 +1,6 @@
 use crate::{
     Error, Result,
-    graph::{Graph, Id, Node, Rational},
+    graph::{Graph, Id, Node, Rational, VectorOperand},
     model::{Assumption, Domain},
 };
 use num_traits::{One, Signed, ToPrimitive, Zero};
@@ -203,6 +203,40 @@ pub fn simplify(g: &mut Graph, root: Id, a: &Assumptions) -> Result<Id> {
                     sum = g.intern(Node::Add(sum, product))?;
                 }
                 go(g, sum, a, memo, depth + 1)?
+            }
+            Node::TensorScalarProduct(left, right) => {
+                let (left_children, right_children) = out.split_at(left.children().len());
+                let entries = |operand: &VectorOperand, children: &[Id]| -> Result<Vec<Id>> {
+                    match operand {
+                        VectorOperand::Entries(_) => Ok(children.to_vec()),
+                        VectorOperand::Tensor(_) => match &g.nodes[children[0]] {
+                            Node::Matrix {
+                                rows: 1, entries, ..
+                            } => Ok(entries.clone()),
+                            _ => Err(Error::Domain("row vector required".into())),
+                        },
+                    }
+                };
+                let left = entries(&left, left_children)?;
+                let right = entries(&right, right_children)?;
+                let product = g.intern(Node::ScalarProduct(left, right))?;
+                go(g, product, a, memo, depth + 1)?
+            }
+            Node::VectorTensorSize(..) => {
+                let Node::Matrix { rows: 1, cols, .. } = g.nodes[out[0]] else {
+                    return Err(Error::Domain("row vector required".into()));
+                };
+                g.number(cols as i64)?
+            }
+            Node::VectorSize(entries) => g.number(entries.len() as i64)?,
+            Node::VectorTensorSelector(..) => {
+                let Node::Matrix {
+                    rows: 1, entries, ..
+                } = &g.nodes[out[1]]
+                else {
+                    return Err(Error::Domain("row vector required".into()));
+                };
+                entries[selector_index(g, out[0], entries.len())? - 1]
             }
             Node::VectorSelector(..) => out[selector_index(g, out[0], out.len() - 1)?],
             Node::MatrixSelector(..) => {
@@ -636,6 +670,10 @@ pub fn dimension(
         | Node::ZeroMatrix(..)
         | Node::MatrixTensor(..)
         | Node::VectorTensor(..)
+        | Node::TensorScalarProduct(..)
+        | Node::VectorTensorSize(..)
+        | Node::VectorSize(..)
+        | Node::VectorTensorSelector(..)
         | Node::VectorSelector(..)
         | Node::MatrixSelector(..)
         | Node::Apply(..) => Ok(None),

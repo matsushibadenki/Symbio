@@ -2,7 +2,7 @@
 use crate::{
     Error, Result,
     algebra::{self, Assumptions},
-    graph::{Graph, Id, Node, Rational},
+    graph::{Graph, Id, Node, Rational, VectorOperand},
     model::Domain,
 };
 use num_traits::{One, Signed, ToPrimitive, Zero};
@@ -165,6 +165,41 @@ pub fn shape(g: &Graph, root: Id) -> Result<Shape> {
                 scalar()?;
                 Shape::Matrix(1, 3)
             }
+            Node::TensorScalarProduct(left, right) => {
+                let (left_shapes, right_shapes) = shapes.split_at(left.children().len());
+                for (operand, shapes) in [(left, left_shapes), (right, right_shapes)] {
+                    let valid = match operand {
+                        VectorOperand::Entries(_) => {
+                            shapes.iter().all(|shape| *shape == Shape::Scalar)
+                        }
+                        VectorOperand::Tensor(_) => {
+                            matches!(shapes, [Shape::Matrix(1, _)])
+                        }
+                    };
+                    if !valid {
+                        return Err(Error::Domain("scalar product requires vectors".into()));
+                    }
+                }
+                Shape::Scalar
+            }
+            Node::VectorTensorSize(vector) => match shapes.as_slice() {
+                [Shape::Matrix(1, _)] if matches!(&g.nodes[*vector], Node::VectorTensor(..)) => {
+                    Shape::Scalar
+                }
+                _ => return Err(Error::Domain("vector size requires a vector tensor".into())),
+            },
+            Node::VectorTensorSelector(_, vector) => match shapes.as_slice() {
+                [Shape::Scalar, Shape::Matrix(1, _)]
+                    if matches!(&g.nodes[*vector], Node::VectorTensor(..)) =>
+                {
+                    Shape::Scalar
+                }
+                _ => {
+                    return Err(Error::Domain(
+                        "vector selector requires a scalar index and a vector tensor".into(),
+                    ));
+                }
+            },
             Node::MatrixSelector(..) => match shapes.as_slice() {
                 [Shape::Scalar, Shape::Scalar, Shape::Matrix(..)] => Shape::Scalar,
                 _ => {
@@ -233,6 +268,20 @@ pub fn rebuild(n: &Node, c: &[Id]) -> Node {
             let (left, right) = c.split_at(left.len());
             Node::ScalarProduct(left.to_vec(), right.to_vec())
         }
+        Node::TensorScalarProduct(left, right) => {
+            let (left_children, right_children) = c.split_at(left.children().len());
+            let rebuild_operand = |operand: &VectorOperand, children: &[Id]| match operand {
+                VectorOperand::Entries(_) => VectorOperand::Entries(children.to_vec()),
+                VectorOperand::Tensor(_) => VectorOperand::Tensor(children[0]),
+            };
+            Node::TensorScalarProduct(
+                rebuild_operand(left, left_children),
+                rebuild_operand(right, right_children),
+            )
+        }
+        Node::VectorTensorSize(..) => Node::VectorTensorSize(c[0]),
+        Node::VectorSize(..) => Node::VectorSize(c.to_vec()),
+        Node::VectorTensorSelector(..) => Node::VectorTensorSelector(c[0], c[1]),
         Node::VectorSelector(..) => Node::VectorSelector(c[0], c[1..].to_vec()),
         Node::MatrixSelector(..) => Node::MatrixSelector([c[0], c[1], c[2]]),
         Node::Apply(name, _) => Node::Apply(name.clone(), c.to_vec()),

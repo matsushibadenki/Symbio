@@ -2,7 +2,7 @@
 //! All accepted notation constructs the same immutable SEG as the expression parser.
 use crate::{
     Error, Result,
-    graph::{Graph, Id, Node},
+    graph::{Graph, Id, Node, VectorOperand},
     parser,
 };
 use serde::Serialize;
@@ -173,11 +173,33 @@ pub fn parse(graph: &mut Graph, source: &str) -> Result<Id> {
                     | "rceil" => Token::Command(name),
                     "cdot" | "times" => Token::Op('*'),
                     "div" => Token::Op('/'),
-                    "scalarmatrix" | "diagonalmatrix" | "constantmatrix" | "zeromatrix"
-                    | "vectortensor" | "matrixtensor" | "outerproduct" | "vectorproduct"
-                    | "scalarproduct" | "vectorselector" | "matrixselector" | "frac" | "dfrac"
-                    | "tfrac" | "sqrt" | "sin" | "cos" | "exp" | "ln" | "log" | "left"
-                    | "right" | "lvert" | "rvert" => Token::Command(name),
+                    "scalarmatrix"
+                    | "diagonalmatrix"
+                    | "constantmatrix"
+                    | "zeromatrix"
+                    | "vectortensor"
+                    | "matrixtensor"
+                    | "outerproduct"
+                    | "vectorproduct"
+                    | "scalarproduct"
+                    | "vectorsize"
+                    | "vectortensorsize"
+                    | "vectortensorselector"
+                    | "vectorselector"
+                    | "matrixselector"
+                    | "frac"
+                    | "dfrac"
+                    | "tfrac"
+                    | "sqrt"
+                    | "sin"
+                    | "cos"
+                    | "exp"
+                    | "ln"
+                    | "log"
+                    | "left"
+                    | "right"
+                    | "lvert"
+                    | "rvert" => Token::Command(name),
                     // Greek letters are variables, never implicit physical or numeric constants.
                     "alpha" | "beta" | "gamma" | "delta" | "theta" | "lambda" | "mu" | "sigma"
                     | "omega" => Token::Symbol(name),
@@ -398,11 +420,43 @@ impl Parser<'_> {
                 "scalarproduct" | "vectorproduct" | "outerproduct" => {
                     let left = self.arguments(depth)?;
                     let right = self.arguments(depth)?;
+                    if s == "scalarproduct" {
+                        let tensor = |entries: &[Id]| match entries {
+                            [id] if matches!(&self.graph.nodes[*id], Node::VectorTensor(..)) => {
+                                Some(*id)
+                            }
+                            _ => None,
+                        };
+                        let (left_tensor, right_tensor) = (tensor(&left), tensor(&right));
+                        if left_tensor.is_some() || right_tensor.is_some() {
+                            let operand = |entries, tensor: Option<Id>| match tensor {
+                                Some(id) => VectorOperand::Tensor(id),
+                                None => VectorOperand::Entries(entries),
+                            };
+                            return self.graph.intern(Node::TensorScalarProduct(
+                                operand(left, left_tensor),
+                                operand(right, right_tensor),
+                            ));
+                        }
+                    }
                     self.graph.intern(match s.as_str() {
                         "outerproduct" => Node::OuterProduct(left, right),
                         "vectorproduct" => Node::VectorProduct(left, right),
                         _ => Node::ScalarProduct(left, right),
                     })
+                }
+                "vectortensorsize" => {
+                    let vector = self.group(depth)?;
+                    self.graph.intern(Node::VectorTensorSize(vector))
+                }
+                "vectorsize" => {
+                    let entries = self.arguments(depth)?;
+                    self.graph.intern(Node::VectorSize(entries))
+                }
+                "vectortensorselector" => {
+                    let index = self.group(depth)?;
+                    let vector = self.group(depth)?;
+                    self.graph.intern(Node::VectorTensorSelector(index, vector))
                 }
                 "vectorselector" => {
                     let index = self.group(depth)?;
@@ -776,6 +830,17 @@ fn tex(g: &Graph, id: Id, depth: usize) -> Result<String> {
         Node::Mul(a, b) => format!(r"\left({}\cdot {}\right)", f(*a)?, f(*b)?),
         Node::Div(a, b) => format!(r"\frac{{{}}}{{{}}}", f(*a)?, f(*b)?),
         Node::Pow(a, b) => format!(r"\left({}\right)^{{{}}}", f(*a)?, f(*b)?),
+        Node::TensorScalarProduct(left, right) => {
+            let vector = |operand: &VectorOperand| -> Result<String> {
+                Ok(operand
+                    .children()
+                    .iter()
+                    .map(|id| f(*id))
+                    .collect::<Result<Vec<_>>>()?
+                    .join(","))
+            };
+            format!(r"\scalarproduct{{{}}}{{{}}}", vector(left)?, vector(right)?)
+        }
         Node::ScalarProduct(left, right)
         | Node::VectorProduct(left, right)
         | Node::OuterProduct(left, right) => {
@@ -824,6 +889,22 @@ fn tex(g: &Graph, id: Id, depth: usize) -> Result<String> {
                 .collect::<Result<Vec<_>>>()?
                 .join(",")
         ),
+        Node::VectorTensorSize(vector) => format!(r"\vectortensorsize{{{}}}", f(*vector)?),
+        Node::VectorSize(entries) => format!(
+            r"\vectorsize{{{}}}",
+            entries
+                .iter()
+                .map(|entry| f(*entry))
+                .collect::<Result<Vec<_>>>()?
+                .join(",")
+        ),
+        Node::VectorTensorSelector(index, vector) => {
+            format!(
+                r"\vectortensorselector{{{}}}{{{}}}",
+                f(*index)?,
+                f(*vector)?
+            )
+        }
         Node::VectorSelector(index, entries) => format!(
             r"\vectorselector{{{}}}{{{}}}",
             f(*index)?,
