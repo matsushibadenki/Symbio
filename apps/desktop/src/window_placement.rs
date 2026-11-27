@@ -177,14 +177,15 @@ impl Store {
         self.recording.store(true, Ordering::Release);
     }
     pub fn capture(&self, window: &tauri::Window) {
-        if !self.recording.load(Ordering::Acquire)
-            || !window.is_visible().unwrap_or(false)
-            || !super::layout::Panel::ALL
-                .iter()
-                .any(|p| p.window() == window.label())
-        {
+        if !self.recording.load(Ordering::Acquire) || !window.is_visible().unwrap_or(false) {
             return;
         }
+        let Some(index) = super::layout::Panel::ALL
+            .iter()
+            .position(|p| p.window() == window.label())
+        else {
+            return;
+        };
         let placement = || -> tauri::Result<Option<Placement>> {
             // Keep the last normal geometry instead of saving minimized/fullscreen bounds.
             if window.is_minimized()? || window.is_maximized()? || window.is_fullscreen()? {
@@ -213,11 +214,9 @@ impl Store {
             }))
         };
         if let Ok(Some(placement)) = placement() {
-            let mut prefs = self.prefs.lock().expect("panel preferences");
-            let index = super::layout::Panel::ALL
-                .iter()
-                .position(|p| p.window() == window.label())
-                .unwrap();
+            let Ok(mut prefs) = self.prefs.lock() else {
+                return;
+            };
             if let Some(slot) = prefs.windows.get_mut(index) {
                 *slot = Some(placement);
             }
@@ -225,7 +224,9 @@ impl Store {
     }
     pub fn restore(&self, window: &tauri::Window, minimum: [f64; 2]) -> tauri::Result<()> {
         let placement = {
-            let prefs = self.prefs.lock().expect("panel preferences");
+            let Ok(prefs) = self.prefs.lock() else {
+                return Ok(());
+            };
             super::layout::Panel::ALL
                 .iter()
                 .position(|p| p.window() == window.label())
@@ -262,7 +263,10 @@ impl Store {
             return;
         }
         if let Some(path) = &self.path {
-            let prefs = self.prefs.lock().expect("panel preferences");
+            let Ok(prefs) = self.prefs.lock() else {
+                eprintln!("panel preferences unavailable; skipping save");
+                return;
+            };
             if let Err(e) = write(path, &prefs) {
                 eprintln!("panel preferences save: {e}");
             }

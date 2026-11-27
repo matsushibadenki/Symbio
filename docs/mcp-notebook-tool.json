@@ -1,0 +1,31 @@
+{
+  "name": "math_read_notebook",
+  "description": "Read the single saved branch authorized at startup. Omit cell_id for cell IDs, names and branch assumptions. Include cell_id for the authored formula, direct dependencies and saved result. Notes, history and other branches are excluded.",
+  "annotations": {
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "cell_id": { "type": "integer", "minimum": 1 }
+    },
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "required": ["ok"],
+    "properties": {
+      "ok": { "type": "boolean" },
+      "branch": { "type": "string" },
+      "revision": { "type": "integer" },
+      "assumptions": { "type": "object" },
+      "cells": { "type": "array", "items": { "type": "object" } },
+      "cell": { "type": "object" },
+      "error": { "type": "object" }
+    },
+    "additionalProperties": false
+  }
+}

@@ -302,12 +302,12 @@ impl Default for LayoutState {
             root: Some(Node::Split {
                 id: 1,
                 axis: Axis::Horizontal,
-                ratio: 0.20,
+                ratio: 0.17,
                 first: Box::new(leaf(2, Panel::Objects)),
                 second: Box::new(Node::Split {
                     id: 3,
                     axis: Axis::Horizontal,
-                    ratio: 0.75,
+                    ratio: 0.78,
                     first: Box::new(Node::Tabs {
                         id: 4,
                         panels: vec![Panel::Notebook, Panel::Surface],

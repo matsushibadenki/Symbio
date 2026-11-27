@@ -1,6 +1,6 @@
 # Local MCP adapter
 
-Symbio exposes a bounded, stateless math-tool server through `symbio-cli mcp`. It uses the same Rust SEG, LaTeX parser, assumptions and computation engine as the notebook. It does not attach to a running desktop app, open a project, edit a document or retain research state between calls.
+Symbio exposes a bounded, stateless math-tool server through `symbio-cli mcp`. It uses the same Rust SEG, LaTeX parser, assumptions and computation engine as the notebook. The default mode has no notebook access. An explicit startup option enables read-only access to a saved snapshot.
 
 ## Start
 
@@ -22,7 +22,13 @@ Configure an MCP client to launch the absolute path of the built executable with
 }
 ```
 
-No client configuration is installed or changed automatically. Package the release executable for distribution rather than relying on a local development path.
+See [AI research setup](ai-research.md#codex-and-standalone-antigravity) for Codex, Antigravity Desktop and Antigravity CLI configuration. No client configuration is installed or changed automatically. Package the release executable for distribution rather than relying on a local development path.
+
+## Optional notebook access
+
+Launch with `mcp --read-project /absolute/path/to/study.symbio` to authorize the saved active branch for this process. Append `--branch NAME` to authorize a specific saved branch instead. Branch names are matched exactly, and an unknown name prevents startup. The selection applies to the MCP process only. Use only with a trusted MCP client. The client or its model may receive the returned formulas, results, and mathematical assumptions. Restart the MCP session after saving to load a new snapshot.
+
+`math_read_notebook` lists cell IDs, names and branch assumptions when called with `{}`. Pass `{"cell_id":1}` to read that cell's authored formula, dependencies and saved result metadata. The capability excludes research notes, ink, history, and other branches. It takes no path from the model, creates no project lock, and offers no document writes. Scratch math tools still have independent state. See the [notebook tool schema](mcp-notebook-tool.json).
 
 ## Tools
 
@@ -47,7 +53,7 @@ For example, call `math_calculate` with:
 
 The cell result is exact `8/3` with Symbolic trust. Another example is `{"source":"sqrt(x^2)","assumptions":{"x":{"domain":"real"}}}`, which returns `abs(x)`. A later call without those assumptions does not inherit them. Trust and mathematical conditions come from the kernel; output never claims formal verification.
 
-Supported operations are `compute`, `simplify`, `differentiate`, `integrate`, `expand`, `solve`, `determinant`, `inverse`, `transpose` and `evaluate`, within the existing [mathematical contract](mathematical-contract.md). `variable` defaults to `x`; source format defaults to Expression and operation to `compute`. Numeric `bindings` apply **only** to explicit `evaluate`; other operations reject nonempty bindings. For example, `{"source":"x^2","operation":"evaluate","bindings":{"x":2}}` returns an Approximate result with the kernel's float64 precision warning. Exact substitution is not exposed yet.
+Supported operations are `compute`, `simplify`, `differentiate`, `integrate`, `expand`, `solve`, `determinant`, `inverse`, `transpose`, `evaluate` and `substitute`, within the existing [mathematical contract](mathematical-contract.md). `variable` defaults to `x`; source format defaults to Expression and operation to `compute`. Numeric `bindings` apply **only** to explicit `evaluate`; other operations reject nonempty bindings. For example, `{"source":"x^2","operation":"evaluate","bindings":{"x":2}}` returns an Approximate result with the kernel's float64 precision warning. Use `substitute` with `exact_bindings` for rational substitution, for example `{"source":"x+y","operation":"substitute","exact_bindings":{"x":"1/3"}}`. The result retains `y` symbolically and records the exact substitution in its conditions. Each binding is an integer, decimal or fraction string. The Rust kernel checks the bindings against assumptions and rejects undefined results.
 
 Unknown fields and operations, executable paths, project paths and external CAS operations such as `factor` are rejected. Cell references cannot refer to another call or the desktop. Mathematical LaTeX is parsed, not run through TeX. No Python, shell, network, file save, remote model, GPU or installer is invoked by these tools. An inherited `SYMBIO_CAS_PYTHON` does not enable CAS through this adapter.
 
@@ -63,7 +69,7 @@ Frames are limited to 64 KiB (oversized input terminates the process); mathemati
 
 ## Next steps
 
-Research-document access, human-reviewable AI proposals, approval-bound changes, natural-language planning, exact substitution and explicit external-CAS permissions remain separate planned work. This server intentionally cannot approve or apply changes to a user's notebook.
+Live-document access, human-reviewable external AI proposals, approval-bound changes, natural-language planning and explicit external-CAS permissions remain separate planned work. This server intentionally cannot approve or apply changes to a user's notebook.
 
 日本語：MCPクライアントから同じRustカーネルで独立計算できます。各呼び出しは新しい状態で実行され、開いている研究文書には接続しません。`math_calculate` と `math_preview_latex` のSchemaを参照してください。
 

@@ -1,0 +1,35 @@
+name: Checks
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Set up Rust
+        run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+      - name: Rust formatting and lint
+        run: |
+          cargo +stable fmt --all -- --check
+          cargo +stable clippy --locked -p symbio-core -p symbio-cli -p symbio-desktop --all-targets -- -D warnings
+      - name: Core and CLI tests
+        run: cargo +stable test --locked -p symbio-core -p symbio-cli
+      - name: UI module tests
+        run: node --test scripts/*.test.mjs
+      - name: CLI and MCP smoke checks
+        run: |
+          python3 -m venv .venv
+          .venv/bin/python -m pip install jsonschema==4.25.1
+          RUSTUP_TOOLCHAIN=stable .venv/bin/python scripts/smoke-cli.py
+          RUSTUP_TOOLCHAIN=stable .venv/bin/python scripts/smoke-mcp.py

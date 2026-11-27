@@ -136,6 +136,14 @@ pub enum Command {
     Note { id: u64, text: String },
     #[serde(rename = "math.branch")]
     Branch { name: String },
+    #[serde(rename = "math.branch_research")]
+    BranchResearch {
+        branch: String,
+        name: String,
+        source: String,
+        source_format: SourceFormat,
+        assumptions: BTreeMap<String, Assumption>,
+    },
     #[serde(rename = "math.checkout")]
     Checkout { name: String },
     #[serde(rename = "math.rename")]
@@ -879,6 +887,47 @@ fn execute(p: &mut Project, command: &Command) -> Result<()> {
             b.name = name.clone();
             p.branches.insert(name.clone(), b);
             p.active = name.clone();
+        }
+        Command::BranchResearch {
+            branch,
+            name,
+            source,
+            source_format,
+            assumptions,
+        } => {
+            if assumptions.is_empty()
+                || assumptions.len() > 64
+                || assumptions
+                    .keys()
+                    .any(|symbol| !graph::valid_symbol(symbol))
+            {
+                return Err(Error::Invalid("research assumptions".into()));
+            }
+            execute(
+                p,
+                &Command::Branch {
+                    name: branch.clone(),
+                },
+            )?;
+            p.current_mut().assumptions.extend(assumptions.clone());
+            let affected = assumptions
+                .keys()
+                .flat_map(|symbol| dependencies::assumption_users(p, symbol))
+                .collect();
+            dependencies::recalculate(p, affected)?;
+            let definition = match source_format {
+                SourceFormat::Expression => Command::Define {
+                    id: None,
+                    name: name.clone(),
+                    source: source.clone(),
+                },
+                SourceFormat::Latex => Command::DefineLatex {
+                    id: None,
+                    name: name.clone(),
+                    source: source.clone(),
+                },
+            };
+            execute(p, &definition)?;
         }
         Command::Checkout { name } => {
             if !p.branches.contains_key(name) {

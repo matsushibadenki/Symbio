@@ -46,6 +46,13 @@ with tempfile.TemporaryDirectory(prefix='symbio-mcp-') as directory:
     assert r['structuredContent']['cell']['result_text']!='abs(x)'
     r=call('math_calculate',{'source':'x^2','operation':'evaluate','bindings':{'x':2}})
     assert r['structuredContent']['cell']['output']['trust']=='approximate'
+    r=call('math_calculate',{'source':'x^2','operation':'substitute','exact_bindings':{'x':'1/3'}})
+    assert r['structuredContent']['cell']['result_text']=='1/9'
+    assert r['structuredContent']['cell']['output']['precision']=='exact'
+    for args in [{'source':'x','operation':'substitute'},
+                 {'source':'x','operation':'substitute','exact_bindings':{'x':1}},
+                 {'source':'x','operation':'evaluate','exact_bindings':{'x':'1'}}]:
+        assert rpc('tools/call',{'name':'math_calculate','arguments':args})['error']['code']==-32602
     r=call('math_preview_latex',{'source':r'\begin{bmatrix}1&2\\3&4\end{bmatrix}'})
     assert r['structuredContent']['preview']['kind']=='matrix'
     for args in [{'source':'@f'},{'source':'1/0'},{'source':'x+'}]:
@@ -61,3 +68,76 @@ with tempfile.TemporaryDirectory(prefix='symbio-mcp-') as directory:
     r=subprocess.run([CLI,'mcp'],input='x'*65537+'\n',capture_output=True,text=True,env=env)
     assert r.returncode!=0 and not r.stdout and '64 KiB' in r.stderr
 print('PASS: real MCP stdio lifecycle, schema validation, exact calculus, evidence, isolation, rejected authority, no CAS/file writes, framing limits')
+
+with tempfile.TemporaryDirectory(prefix="symbio-mcp-notebook-") as directory:
+    path = Path(directory) / "study.symbio"
+    subprocess.run([CLI, "init", path], capture_output=True, check=True)
+    changes = [
+        {"expected_revision": 0, "actor": "human",
+         "command": {"method": "math.note", "id": 1, "text": "private note"}},
+        {"method": "math.save"},
+    ]
+    saved = subprocess.run([CLI, "serve", path], text=True, capture_output=True, check=True,
+                           input="".join(json.dumps(row) + "\n" for row in changes))
+    assert all(json.loads(line)["ok"] for line in saved.stdout.splitlines())
+    path.with_suffix(".symbio.lock").unlink()
+    original = path.read_bytes()
+    with subprocess.Popen([CLI, "mcp", "--read-project", path], text=True,
+                          stdin=subprocess.PIPE, stdout=subprocess.PIPE) as process:
+        rpc("initialize", {"protocolVersion": "2025-11-25", "capabilities": {},
+                           "clientInfo": {"name": "symbio-smoke", "version": "1"}})
+        send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+        schema = next(tool for tool in rpc("tools/list")["result"]["tools"]
+                      if tool["name"] == "math_read_notebook")
+        for args in [{}, {"cell_id": 1}, {"cell_id": 999}]:
+            response = rpc("tools/call", {"name": schema["name"], "arguments": args})["result"]
+            content = response["structuredContent"]
+            jsonschema.validate(args, schema["inputSchema"])
+            jsonschema.validate(content, schema["outputSchema"])
+            assert "private note" not in json.dumps(content)
+            if not args:
+                assert content["revision"] == 1 and content["cells"][0]["id"] == 1
+            elif args["cell_id"] == 1:
+                assert content["cell"]["source"]
+                assert "note" not in content["cell"] and "history" not in content
+            else:
+                assert response["isError"] and content["error"]["code"] == "cell_not_found"
+        for args in [{"path": str(path)}, {"cell_id": 0}, {"cell_id": None}]:
+            assert rpc("tools/call", {"name": schema["name"], "arguments": args})["error"]["code"] == -32602
+        process.stdin.close()
+        assert process.wait(timeout=10) == 0
+    assert path.read_bytes() == original and list(Path(directory).iterdir()) == [path]
+print("PASS: opt-in MCP notebook read, schema, data boundaries and no file changes")
+
+with tempfile.TemporaryDirectory(prefix="symbio-mcp-branch-") as directory:
+    path = Path(directory) / "study.symbio"
+    subprocess.run([CLI, "init", path], capture_output=True, check=True)
+    commands = [
+        {"method": "math.branch", "name": "real study"},
+        {"method": "math.assume", "symbol": "x", "assumption": {"domain": "positive"}},
+        {"method": "math.checkout", "name": "main"},
+    ]
+    requests = [{"expected_revision": rev, "actor": "human", "command": command}
+                for rev, command in enumerate(commands)]
+    requests.append({"method": "math.save"})
+    saved = subprocess.run([CLI, "serve", path], text=True, capture_output=True, check=True,
+                           input="".join(json.dumps(row) + "\n" for row in requests))
+    assert all(json.loads(line)["ok"] for line in saved.stdout.splitlines())
+    original = path.read_bytes()
+    with subprocess.Popen([CLI, "mcp", "--read-project", path, "--branch", "real study"], text=True,
+                          stdin=subprocess.PIPE, stdout=subprocess.PIPE) as process:
+        rpc("initialize", {"protocolVersion": "2025-11-25", "capabilities": {},
+                           "clientInfo": {"name": "symbio-smoke", "version": "1"}})
+        send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+        content = rpc("tools/call", {"name": "math_read_notebook"})["result"]["structuredContent"]
+        assert content["branch"] == "real study" and content["assumptions"]["x"]["domain"] == "positive"
+        assert "main" not in content
+        blocked = rpc("tools/call", {"name": "math_read_notebook", "arguments": {"branch": "main"}})
+        assert blocked["error"]["code"] == -32602
+        process.stdin.close()
+        assert process.wait(timeout=10) == 0
+    assert json.loads(path.read_bytes())["active"] == "main" and path.read_bytes() == original
+    unknown = subprocess.run([CLI, "mcp", "--read-project", path, "--branch", "missing"],
+                             capture_output=True, text=True)
+    assert unknown.returncode != 0 and not unknown.stdout and "does not exist" in unknown.stderr
+print("PASS: explicit saved branch selection and startup authorization boundary")

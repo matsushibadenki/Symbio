@@ -355,3 +355,56 @@ fn explicit_model_numeric_evaluation_does_not_require_an_input_value_for_its_out
         Rational::from_integer((-5).into())
     );
 }
+
+#[test]
+fn research_branch_applies_assumptions_and_definition_as_one_revision() {
+    let mut c = core();
+    define(&mut c, "original", "sqrt(x^2)", false);
+    let baseline = c.snapshot();
+    let request = |source: &str| Request {
+        expected_revision: baseline.revision,
+        actor: Actor::Ai,
+        command: Command::BranchResearch {
+            branch: "research-1".into(),
+            name: "research1".into(),
+            source: source.into(),
+            source_format: SourceFormat::Latex,
+            assumptions: BTreeMap::from([(
+                "x".into(),
+                Assumption {
+                    domain: Domain::Real,
+                    nonzero: false,
+                    dimension: None,
+                },
+            )]),
+        },
+    };
+    assert!(c.apply(request(r"\frac{")).is_err());
+    assert_eq!(c.snapshot().revision, baseline.revision);
+    assert_eq!(c.snapshot().branches, baseline.branches);
+
+    let result = c.apply(request(r"\sqrt{x^2}")).unwrap();
+    assert_eq!(result.revision, baseline.revision + 1);
+    assert_eq!(result.active, "research-1");
+    assert_eq!(result.cells.len(), 2);
+    assert_eq!(result.cells[0].result_text.as_deref(), Some("abs(x)"));
+    assert_eq!(result.cells[1].result_text.as_deref(), Some("abs(x)"));
+    assert_eq!(
+        result.history.first().unwrap().command["method"],
+        "math.branch_research"
+    );
+
+    let base = edit(
+        &mut c,
+        Command::Checkout {
+            name: baseline.active.clone(),
+        },
+    );
+    assert_eq!(base.assumptions, baseline.assumptions);
+    assert_eq!(base.cells.len(), 1);
+    assert_eq!(base.cells[0].result_text, baseline.cells[0].result_text);
+    edit(&mut c, Command::Undo);
+    let undone = edit(&mut c, Command::Undo);
+    assert_eq!(undone.branches, baseline.branches);
+    assert_eq!(undone.active, baseline.active);
+}

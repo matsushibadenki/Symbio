@@ -45,15 +45,19 @@ impl ProjectStore {
             baseline,
         })
     }
+    /// Load a saved snapshot without taking a project lock or opening for writing.
+    pub fn read_snapshot(path: impl AsRef<Path>) -> Result<Project> {
+        let path = path.as_ref();
+        if !path.symlink_metadata()?.is_file() {
+            return Err(Error::Invalid("regular project file required".into()));
+        }
+        let bytes =
+            read_optional(path)?.ok_or_else(|| Error::Invalid("project not found".into()))?;
+        decode_project(&bytes)
+    }
     pub fn load(&mut self) -> Result<Option<Project>> {
         let bytes = read_optional(&self.path)?;
-        let project = bytes
-            .as_deref()
-            .map(serde_json::from_slice::<Project>)
-            .transpose()?;
-        if let Some(p) = &project {
-            p.validate()?;
-        }
+        let project = bytes.as_deref().map(decode_project).transpose()?;
         self.baseline = bytes;
         Ok(project)
     }
@@ -82,6 +86,11 @@ impl ProjectStore {
     pub fn path(&self) -> &Path {
         &self.path
     }
+}
+fn decode_project(bytes: &[u8]) -> Result<Project> {
+    let project: Project = serde_json::from_slice(bytes)?;
+    project.validate()?;
+    Ok(project)
 }
 fn read_optional(path: &Path) -> Result<Option<Vec<u8>>> {
     let file = match File::open(path) {

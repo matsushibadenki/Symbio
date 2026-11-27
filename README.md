@@ -14,7 +14,8 @@ Third-party components retain their own copyrights and licenses. Symbio's MIT li
 | `ort` 2.0.0-rc.11 and its `ort-sys` binding | MIT OR Apache-2.0 | Alternative licenses; retain the applicable upstream license and notices. |
 | `image` 0.25.10 | MIT OR Apache-2.0 | Alternative licenses; retain the applicable upstream license and notices. |
 | `tauri`, `tauri-build`, `tauri-plugin-dialog` | Apache-2.0 OR MIT | Alternative licenses; retain the applicable upstream license and notices. |
-| `wgpu`, `naga`, `num-bigint`, `num-rational`, `num-traits`, `serde`, `serde_json`, `sha2`, `tempfile`, `thiserror`, `uuid` | MIT OR Apache-2.0 | Alternative licenses; retain the applicable upstream license and notices. |
+| `wgpu`, `naga`, `num-bigint`, `num-rational`, `num-traits`, `serde`, `serde_json`, `sha2`, `sys-locale`, `tempfile`, `thiserror`, `uuid` | MIT OR Apache-2.0 | Alternative licenses; retain the applicable upstream license and notices. |
+| `reqwest` | MIT OR Apache-2.0 | Alternative licenses; retain the applicable upstream license and notices. |
 | `pollster` | Apache-2.0 / MIT (upstream dual-license declaration) | Retain the applicable upstream license and notices. |
 | `bytemuck`, `objc2-app-kit` | Zlib OR Apache-2.0 OR MIT | Alternative licenses; retain the applicable upstream license and notices. |
 | `quick-xml` | MIT | Retain the upstream copyright and permission notice. |
@@ -179,7 +180,7 @@ KOMYAKU's **↙ .symbio** reads the selected equation from the active branch of 
 - Cell references and recalculation are local to the active branch. References must name existing cells. Dependency expansion is bounded by the graph, source and nesting limits; unused nodes are collected automatically or through the inspector. The 16,000-node limit still bounds live structure and individual operations.
 - Results are `symbolic` or `approximate`. `conjecture` is a reserved data type. The release does not issue `verified` or `certified_numeric` results or claim formal proofs or certified numerical errors.
 - `.symbio` v1 is readable JSON. SQLite containers, content-addressed data, complete event replay and branch merging remain future work. The audit retains 256 events; Undo stacks are not persisted.
-- The structured API accepts an AI actor attribution, but AI connections, natural-language interpretation and an MCP server are not implemented. The app makes no external network requests.
+- The optional AI Research dialog connects to OpenAI, Google Gemini or a loopback model server when you submit a question. It runs mathematical tool calls in the Rust kernel and shows the evidence alongside the model response. See [AI research setup](docs/ai-research.md).
 
 [Architecture](docs/architecture.md) · [Math API](docs/math-api.md) · [Roadmap](docs/roadmap.md) · [Provenance](docs/provenance.md) · [Validation](docs/validation.md)
 

@@ -224,6 +224,7 @@ async fn edit(
                 | symbio_core::Command::Recalculate { .. }
                 | symbio_core::Command::Checkout { .. }
                 | symbio_core::Command::Branch { .. }
+                | symbio_core::Command::BranchResearch { .. }
                 | symbio_core::Command::Undo
                 | symbio_core::Command::Redo
                 | symbio_core::Command::Remove { .. }
@@ -316,6 +317,83 @@ fn export_document(
     )
     .map_err(|_| error("internal_error"))
 }
+#[derive(Default)]
+struct ResearchRequests(Mutex<ResearchRequestState>);
+
+#[derive(Default)]
+struct ResearchRequestState {
+    active: Option<(String, tokio::task::AbortHandle)>,
+    cancelled: Option<String>,
+}
+
+#[tauri::command]
+async fn run_research(
+    webview: tauri::Webview,
+    requests: tauri::State<'_, ResearchRequests>,
+    request_id: String,
+    provider: symbio_cli::research::Provider,
+    model: String,
+    prompt: String,
+    local_base: Option<String>,
+    api_key: Option<String>,
+) -> Result<symbio_cli::research::Report, String> {
+    if webview.label() != "notebook" || request_id.is_empty() || request_id.len() > 64 {
+        return Err("forbidden".into());
+    }
+    let task = {
+        let mut state = requests.0.lock().map_err(|_| "internal_error")?;
+        if state.cancelled.as_deref() == Some(&request_id) {
+            return Err("research_cancelled".into());
+        }
+        if state.active.is_some() {
+            return Err("research_busy".into());
+        }
+        let task = tauri::async_runtime::spawn(async move {
+            symbio_cli::research::run(
+                provider,
+                &model,
+                &prompt,
+                local_base.as_deref(),
+                api_key.as_deref(),
+            )
+            .await
+        });
+        state.active = Some((request_id.clone(), task.inner().abort_handle()));
+        task
+    };
+    let result = task.await;
+    let mut state = requests.0.lock().map_err(|_| "internal_error")?;
+    if state
+        .active
+        .as_ref()
+        .is_some_and(|(id, _)| id == &request_id)
+    {
+        state.active = None;
+        return result.map_err(|_| "internal_error".to_owned())?;
+    }
+    Err("research_cancelled".into())
+}
+
+#[tauri::command]
+fn cancel_research(
+    webview: tauri::Webview,
+    requests: tauri::State<'_, ResearchRequests>,
+    request_id: String,
+) -> Result<(), String> {
+    if webview.label() != "notebook" || request_id.is_empty() || request_id.len() > 64 {
+        return Err("forbidden".into());
+    }
+    let mut state = requests.0.lock().map_err(|_| "internal_error")?;
+    state.cancelled = Some(request_id.clone());
+    if let Some((id, task)) = &state.active
+        && id == &request_id
+    {
+        task.abort();
+        state.active = None;
+    }
+    Ok(())
+}
+
 fn main() {
     let result = tauri::Builder::default()
         .menu(|app| {
@@ -359,6 +437,7 @@ fn main() {
         .manage(handwriting::State::default())
         .setup(|app| {
             app.manage(cas_settings::Settings::default());
+            app.manage(ResearchRequests::default());
             cas_settings::initialize(app.handle());
             let args: Vec<_> = std::env::args().skip(1).collect();
             let path = if args.len() == 2 && args[0] == "--project" {
@@ -394,6 +473,8 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            run_research,
+            cancel_research,
             handwriting::configure,
             handwriting::handwriting_pick_path,
             handwriting::handwriting_settings,

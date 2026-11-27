@@ -1,5 +1,5 @@
-mod mcp;
 use std::io::{self, BufRead, Read, Write};
+use symbio_cli::{mcp, research};
 use symbio_core::{AppCore, Project, ProjectStore, Request};
 fn main() {
     if let Err(e) = run() {
@@ -9,8 +9,56 @@ fn main() {
 }
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
-    if args.as_slice() == ["mcp"] {
-        return mcp::serve(io::stdin().lock(), io::stdout().lock());
+    if args.first().is_some_and(|arg| arg == "research") {
+        let [_, provider, model, rest @ ..] = args.as_slice() else {
+            return Err(
+                "usage: symbio-cli research openai|gemini|local MODEL [LOCAL_BASE_URL] < PROMPT"
+                    .into(),
+            );
+        };
+        let provider: research::Provider = serde_json::from_value(serde_json::json!(provider))?;
+        if !rest.is_empty() && !(rest.len() == 1 && matches!(provider, research::Provider::Local)) {
+            return Err("the optional base URL is only for the local provider".into());
+        }
+        let mut prompt = String::new();
+        io::stdin()
+            .take(research::MAX_PROMPT as u64 + 1)
+            .read_to_string(&mut prompt)?;
+        let report = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?
+            .block_on(research::run(
+                provider,
+                model,
+                &prompt,
+                rest.first().map(String::as_str),
+                None,
+            ))?;
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+    if args.first().is_some_and(|command| command == "mcp") {
+        let (path, branch) = match args.as_slice() {
+            [_] => return mcp::serve(io::stdin().lock(), io::stdout().lock()),
+            [_, flag, path] if flag == "--read-project" => (path, None),
+            [_, flag, path, branch_flag, branch]
+                if flag == "--read-project" && branch_flag == "--branch" =>
+            {
+                (path, Some(branch))
+            }
+            _ => {
+                return Err("usage: symbio-cli mcp [--read-project PROJECT [--branch NAME]]".into());
+            }
+        };
+        let mut project = ProjectStore::read_snapshot(path)?;
+        if let Some(branch) = branch {
+            if !project.branches.contains_key(branch) {
+                return Err("the requested saved branch does not exist".into());
+            }
+            project.active.clone_from(branch);
+        }
+        let notebook = AppCore::new(project)?.snapshot();
+        return mcp::serve_snapshot(io::stdin().lock(), io::stdout().lock(), Some(notebook));
     }
     if args
         .first()
@@ -75,7 +123,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     if args.len() != 2 || !["init", "inspect", "serve"].contains(&args[0].as_str()) {
-        return Err("usage: symbio-cli mcp | import-openmath XML NEW_PROJECT | export-openmath PROJECT XML | import-mathjson JSON NEW_PROJECT | export-mathjson PROJECT JSON | init|inspect|serve PROJECT | export-reproduction PROJECT PACKAGE | verify-reproduction PACKAGE [--allow-cas]".into());
+        return Err("usage: symbio-cli mcp [--read-project PROJECT [--branch NAME]] | research PROVIDER MODEL [LOCAL_BASE_URL] | import-openmath XML NEW_PROJECT | export-openmath PROJECT XML | import-mathjson JSON NEW_PROJECT | export-mathjson PROJECT JSON | init|inspect|serve PROJECT | export-reproduction PROJECT PACKAGE | verify-reproduction PACKAGE [--allow-cas]".into());
     }
     let mut store = ProjectStore::open(&args[1])?;
     let project = match store.load()? {

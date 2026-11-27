@@ -8,8 +8,11 @@ tauri-build = "=2.7.3"
 [dependencies]
 symbio-handwriting = { path = "../../crates/handwriting" }
 symbio-core = { path = "../../crates/symbio-core" }
+symbio-cli = { path = "../../crates/symbio-cli" }
 tauri = { version = "=2.12.4", features = ["unstable"] }
 serde.workspace = true
+tokio = "1"
+sys-locale = "0.3.2"
 serde_json.workspace = true
 wgpu.workspace = true
 bytemuck = { workspace = true, features = ["derive"] }

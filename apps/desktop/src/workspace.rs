@@ -42,11 +42,23 @@ impl Drop for Guard<'_> {
 }
 impl Workspace {
     pub fn load(path: PathBuf) -> Self {
+        let default_layout = || LayoutState {
+            locale: sys_locale::get_locales()
+                .find_map(|locale| match locale.split(['-', '_']).next()? {
+                    "ja" => Some("ja"),
+                    "zh" => Some("zh-CN"),
+                    "en" => Some("en"),
+                    _ => None,
+                })
+                .unwrap_or("en")
+                .to_owned(),
+            ..LayoutState::default()
+        };
         let read = || -> Result<LayoutState, Box<dyn std::error::Error>> {
             let file = match std::fs::File::open(&path) {
                 Ok(f) => f,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    return Ok(LayoutState::default());
+                    return Ok(default_layout());
                 }
                 Err(e) => return Err(e.into()),
             };
@@ -61,7 +73,7 @@ impl Workspace {
             Ok(s) => (s, Some(path)),
             Err(e) => {
                 eprintln!("Symbio layout preserved; using defaults: {e}");
-                (LayoutState::default(), None)
+                (default_layout(), None)
             }
         };
         Self {

@@ -1,3 +1,5 @@
+import {researchContext,researchPrompt} from './research-context.js';
+import {researchBranchName,researchEdit,researchFormula} from './research-proposal.js';
 import {openHandwriting} from './handwriting.js';
 import {compareDocumentSnapshot} from './document-state.js';
 import {t,setLocale,locale} from './i18n.js';
@@ -27,7 +29,7 @@ const label=(key,node)=>el('label',{},el('span',{class:'small',text:t(key)}),nod
 function field(key,value,attrs={}){return el('input',{'aria-label':t(key),title:t(key),value,...attrs})}
 function formula(html){
  const n=el('div',{class:'formula'}),body=el('div',{class:'math-scroll'});body.innerHTML=html; // Only Rust-generated MathML.
- for(const ref of body.querySelectorAll('[data-reference]')){ref.setAttribute('tabindex','0');ref.setAttribute('role','link');ref.setAttribute('aria-label',t('reference_to')+' '+ref.dataset.reference);ref.setAttribute('title',t('reference_to')+' '+ref.dataset.reference);}
+ for(const ref of body.querySelectorAll('[data-reference]')){ref.setAttribute('tabindex','0');ref.setAttribute('role','link');ref.setAttribute('aria-label',t('reference_to',{name:ref.dataset.reference}));ref.setAttribute('title',t('reference_to',{name:ref.dataset.reference}));}
  const zoom=button('formula_focus','float',()=>showFormula(html),{class:'formula-zoom'});
  n.append(body,zoom);return n;
 }
@@ -146,9 +148,168 @@ async function editHandwriting(cell) {
  }
  });
 }
+function researchReview(proposal, baseline, dialog) {
+ const message=el('p',{'aria-live':'polite',class:'small',text:t('research_formula_only')});
+ const assumptions=Object.entries(proposal.assumptions);
+ const branch=assumptions.length?researchBranchName(baseline.branches):null;
+ const buttons=[];
+ async function approve(targetBranch){
+  const edit=researchEdit(proposal,baseline,current,targetBranch);
+  if(!edit){message.textContent=t('research_stale');return;}
+  if(pendingDrafts()){message.textContent=t('draft_pending');return;}
+  for(const control of buttons)control.disabled=true;
+  try {
+   await draftQueue;
+   accept(await invoke('edit',edit));
+   dialog.close();
+  } catch(error) {
+   message.textContent=t(error.code||'error');
+  } finally {
+   for(const control of buttons)control.disabled=false;
+  }
+ }
+ buttons.push(button('research_approve',null,()=>approve(null),branch?{}:{class:'primary'}));
+ if(branch)buttons.push(button('research_approve_branch',null,()=>approve(branch),{class:'primary'}));
+ return el('section',{class:'research-review'},
+  el('strong',{text:t('research_proposed_formula')}),
+  formula(proposal.mathml),
+  assumptions.length?el('div',{},
+   el('strong',{text:t('research_scratch_assumptions')}),
+   el('ul',{},...assumptions.map(([symbol,value])=>el('li',{text:
+    conditionLabel(symbol+': '+value.domain+(value.nonzero?', nonzero':''))+
+    (value.dimension?' · M '+value.dimension[0]+' L '+value.dimension[1]+' T '+value.dimension[2]:'')})))):null,
+  message,
+  branch?el('p',{class:'small',text:t('research_branch_scope',{branch})}):null,
+  el('div',{class:'research-actions'},...buttons));
+}
+
+function researchContextPicker(snapshot) {
+ const cells=new Set(),assumptions=new Set();
+ const preview=el('pre',{class:'research-context-preview',hidden:''});
+ const select=(value,label,selection)=>el('label',{},el('input',{type:'checkbox',onchange:event=>{
+  if(event.target.checked)selection.add(value);else selection.delete(value);
+  preview.textContent=researchContext(snapshot,cells,assumptions);
+  preview.hidden=!preview.textContent;
+ }}),el('span',{text:label}));
+ const groups=[
+  [t('expressions'),snapshot.cells.map(cell=>select(cell.id,cell.name,cells))],
+  [t('assumptions'),Object.keys(snapshot.assumptions).map(name=>select(name,name,assumptions))],
+ ];
+ const control=el('details',{class:'research-context'},
+  el('summary',{text:t('research_context')}),
+  el('p',{class:'small',text:t('research_context_help')}),
+  ...groups.filter(([,items])=>items.length).map(([name,items])=>
+   el('fieldset',{},el('legend',{text:name}),...items)),
+  preview);
+ return {control,selected:()=>researchContext(snapshot,cells,assumptions)};
+}
+
+let activeResearch = null;
+function showResearch() {
+ const provider = el('select', {'aria-label': t('research_provider')},
+  ...[['local',t('research_local')],['openai','OpenAI'],['gemini','Google Gemini']]
+   .map(([value,text])=>el('option',{value,text})));
+ const model = field('research_model','',{required:'',maxlength:200});
+ const localBase = field('research_url','http://127.0.0.1:11434/v1');
+ const apiKey = field('research_key','',{type:'password',autocomplete:'off'});
+ const prompt = el('textarea',{'aria-label':t('research_prompt'),placeholder:t('research_prompt'),required:'',maxlength:32768});
+ const response = el('div',{'aria-live':'polite'});
+ const urlLabel = label('research_url',localBase);
+ provider.addEventListener('change',()=>{
+  urlLabel.hidden=provider.value!=='local';
+  apiKey.value='';
+ });
+ const dialog = el('dialog',{class:'research-dialog','aria-label':t('research')});
+ const submit = el('button',{type:'submit',text:t('research_send')});
+ const contextSnapshot=current;
+ const context=researchContextPicker(contextSnapshot);
+ const selected = current.cells.find(c=>c.id===current.selected);
+ const form = el('form',{class:'research-form'},
+  el('div',{class:'research-settings'},label('research_provider',provider),label('research_model',model),urlLabel,label('research_key',apiKey)),
+  prompt,context.control,
+  el('div',{class:'research-actions'},selected?button('research_insert','add',()=>{
+   prompt.value += (prompt.value?'\n\n':'')+selected.name+' ['+selected.source_format+']\n'+selected.source;
+   prompt.focus();
+  }):null,submit));
+ let request=null;
+ const cancel=button('research_cancel',null,cancelRequest,{hidden:''});
+ function setRunning(running){
+  for(const field of form.elements)field.disabled=running;
+  cancel.hidden=!running;
+  cancel.disabled=false;
+ }
+ async function cancelRequest(){
+  const pending=request;
+  if(!pending||pending.cancelled)return;
+  pending.cancelled=true;
+  cancel.disabled=true;
+  try {
+   await invoke('cancel_research',{requestId:pending.id});
+   response.replaceChildren(el('p',{text:t('research_cancelled')}));
+  } catch(error) {
+   response.replaceChildren(el('p',{class:'calculation-error',text:t(error.code||String(error))}));
+  } finally {
+   if(activeResearch===pending)activeResearch=null;
+   request=null;
+   setRunning(false);
+  }
+ }
+ form.addEventListener('submit',async event=>{
+  event.preventDefault();
+  if(activeResearch){response.replaceChildren(el('p',{text:t('research_busy')}));return;}
+  const baseline=current;
+  const payload=context.selected();
+  if(payload&&(baseline.generation!==contextSnapshot.generation||baseline.revision!==contextSnapshot.revision)){
+   response.replaceChildren(el('p',{class:'calculation-error',text:t('research_context_stale')}));
+   return;
+  }
+  const question=researchPrompt(prompt.value,payload);
+  if(!prompt.value.trim()||new TextEncoder().encode(question).length>32768){
+   response.replaceChildren(el('p',{class:'calculation-error',text:t('invalid_research_prompt')}));
+   return;
+  }
+  const pending={id:crypto.getRandomValues(new Uint32Array(4)).join('-'),cancelled:false};
+  request=pending;
+  activeResearch=pending;
+  setRunning(true);
+  response.replaceChildren(el('p',{text:t('working')}));
+  try {
+   const report=await invoke('run_research',{requestId:pending.id,provider:provider.value,model:model.value.trim(),prompt:question,
+    localBase:provider.value==='local'?localBase.value.trim():null,apiKey:apiKey.value||null});
+   if(pending.cancelled||!dialog.isConnected)return;
+   const evidence=report.evidence.map(({tool,arguments:args,result})=>{
+    const cell=result.cell;
+    const resultText=cell?.result_text||result.preview?.expression||t(cell?.calculation_error||result.error?.code||'no_result');
+    const proposal=researchFormula(tool,args,result);
+    return el('details',{},el('summary',{text:tool+' · '+resultText}),
+     proposal?researchReview(proposal,baseline,dialog):null,
+     el('details',{},el('summary',{text:t('json')}),el('pre',{text:JSON.stringify({arguments:args,result},null,2)})));
+   });
+   response.replaceChildren(el('h3',{text:t('research_answer')}),
+    el('div',{class:'research-answer',text:report.answer}),
+    el('h3',{text:t('research_evidence')}),...evidence,
+    ...(evidence.length?[]:[el('p',{class:'small',text:t('research_no_evidence')})]));
+  } catch(error) {
+   if(pending.cancelled||!dialog.isConnected)return;
+   const [key,code]=String(error?.code||error).split(':');
+   response.replaceChildren(el('p',{class:'calculation-error',text:t(key)+(code?' ('+code+')':'')}));
+  } finally {
+   if(!pending.cancelled){
+    if(activeResearch===pending)activeResearch=null;
+    request=null;
+    setRunning(false);
+   }
+  }
+ });
+ dialog.append(el('div',{class:'dialog-head'},el('strong',{text:t('research')}),
+  button('research_help','info',()=>{}),cancel,button('close','close',()=>dialog.close())),form,response);
+ dialog.addEventListener('close',()=>{void cancelRequest();apiKey.value='';dialog.remove()});
+ document.body.append(dialog);
+ dialog.showModal();
+}
 function notebook(){
  const out=el('div',{class:'content notebook'});
- if(api)out.append(el('div',{class:'ink-launch'},button('handwriting','edit',()=>action(()=>editHandwriting()))));
+ if(api)out.append(el('div',{class:'ink-launch research-launch'},button('research','research',showResearch),button('handwriting','edit',()=>action(()=>editHandwriting()))));
  if(!current.cells.length)out.append(el('div',{class:'empty',text:t('empty')}));
  for(const c of current.cells)out.append(cell(c));
  return out;
@@ -182,10 +343,21 @@ function cell(c){
   for(const [operation,glyph]of Object.entries(operations))contextual.append(el('button',{type:'button',title:t(operation),'aria-label':`${t(operation)} ${c.id}`,'data-operation':operation,onclick:()=>run(operation),...(operation==='solve_polynomial'&&!casRuntime?.python?{disabled:'',title:t('cas_unavailable')}: {})},glyph));
  }
  updateKind({kind:c.kind});
- const ops=el('div',{class:'operation-bar'},el('button',{type:'button',class:'primary',title:t('compute_help'),'aria-label':`${t('compute')} ${c.id}`,onclick:()=>run('compute')},el('span',{class:'word',text:t('compute')})),contextual,...Object.entries({differentiate:'d/dx',integrate:'∫',expand:'( )',factor:'(·)(·)',evaluate:'≈'}).map(([key,glyph])=>el('button',{type:'button',title:t(key),'data-operation':key,'aria-label':`${t(key)} ${c.id}`,onclick:()=>{if(key==='evaluate'){numericSettings.open=true;numericInputs.querySelector('input')?.focus();return}run(key)}},key==='evaluate'?el('span',{class:'word',text:'≈ '+t('numeric_short')}):glyph)),el('button',{type:'button','data-operation':'substitute',class:'word',title:t('substitute_help'),'aria-label':`${t('substitute')} ${c.id}`,onclick:()=>{exactSettings.open=true;exactInputs.querySelector('input')?.focus()}},t('substitute')),button('surface_show','surface',()=>action(async()=>{await commit(c);surface=await invoke('surface_command',{command:{kind:'select',id:c.id}})})),button('plot','plot',()=>action(async()=>{await commit(c);await invoke('show_plot',{id:c.id})}),{'data-operation':'plot'}),label('variable',variable),el('span',{class:'spacer'}),button('info','info',()=>{source.focus()}));
+ const secondary=el('div',{class:'operation-bar secondary-operations'},
+  ...Object.entries({differentiate:'d/dx',integrate:'∫',expand:'( )',factor:'(·)(·)'}).map(([key,glyph])=>
+   el('button',{type:'button',title:t(key),'data-operation':key,'aria-label':`${t(key)} ${c.id}`,onclick:()=>run(key)},glyph)),
+  button('surface_show','surface',()=>action(async()=>{await commit(c);surface=await invoke('surface_command',{command:{kind:'select',id:c.id}})})),
+  button('plot','plot',()=>action(async()=>{await commit(c);await invoke('show_plot',{id:c.id})}),{'data-operation':'plot'}));
+ const more=disclosure(`cell-operations-${c.id}`,el('span',{text:t('more_operations')}),secondary);
+ more.className='cell-more-operations';
+ const ops=el('div',{class:'operation-bar'},
+  el('button',{type:'button',class:'primary',title:t('compute_help'),'aria-label':`${t('compute')} ${c.id}`,onclick:()=>run('compute')},t('compute')),
+  contextual,label('variable',variable),
+  el('button',{type:'button','data-operation':'substitute',title:t('substitute_help'),'aria-label':`${t('substitute')} ${c.id}`,onclick:()=>{exactSettings.open=true;exactInputs.querySelector('input')?.focus()}},t('substitute')),
+  el('button',{type:'button','data-operation':'evaluate',title:t('evaluate'),'aria-label':`${t('evaluate')} ${c.id}`,onclick:()=>{numericSettings.open=true;numericInputs.querySelector('input')?.focus()}},'≈ '+t('numeric_short')));
  ops.dataset.kind=cellKind;
- const factorControl=ops.querySelector('[data-operation="factor"]');if(!casRuntime?.python){factorControl.disabled=true;factorControl.title=t('cas_unavailable');}
- ops.insertBefore(ops.querySelector('[data-operation="substitute"]'),ops.querySelector('[data-operation="evaluate"]'));
+ const factorControl=secondary.querySelector('[data-operation="factor"]');
+ if(!casRuntime?.python){factorControl.disabled=true;factorControl.title=t('cas_unavailable');}
  const numericInputs=el('div',{class:'numeric-inputs'});
  const numericSettings=el('details',{class:'numeric-settings'},el('summary',{},icon('settings'),el('span',{text:t('numeric_parameters')})),numericInputs,el('button',{type:'button',class:'outline',title:t('evaluate'),'aria-label':`${t('evaluate')} ${c.id}`,onclick:()=>run('evaluate')},'≈',el('span',{class:'word',text:t('evaluate')})));
  function refreshNumericBindings(){numericInputs.replaceChildren(...inputSymbols.map(symbol=>el('label',{class:'numeric-binding'},el('span',{text:symbol}),el('input',{type:'number',step:'any','aria-required':'true',value:bindingValues[symbol]??'','data-symbol':symbol,'aria-label':`${t('numeric_value')} ${symbol}`,oninput:e=>{bindingValues[symbol]=e.target.value;remember(c.id,'numericBindings',{...bindingValues})}}))));if(!inputSymbols.length)numericInputs.append(el('span',{class:'small',text:t('no_numeric_parameters')}));}
@@ -203,12 +375,23 @@ function cell(c){
   if(keyboard?.id===c.id&&keyboard.kind==='source')form.querySelector('.source-editor').append(createMathKeyboard(source,{id:`${current.active}:${c.id}`,mode:format,onRun:run,onClose:()=>{keyboard=null;render()}}));
  }
  form.append(ops,exactSettings,numericSettings);
- function updateOperationLabels(){const symbol=variable.value.trim()||'x';for(const [key,text]of Object.entries({differentiate:`${inputSymbols.some(s=>s!==symbol)?'∂/∂':'d/d'}${symbol}`,integrate:`∫ d${symbol}`,solve:`${symbol} = ?`,solve_polynomial:`${symbol} = ? · CAS`})) {const control=ops.querySelector(`[data-operation="${key}"]`);if(control)control.textContent=text;}}
+ function updateOperationLabels(){const symbol=variable.value.trim()||'x';for(const [key,text]of Object.entries({differentiate:`${inputSymbols.some(s=>s!==symbol)?'∂/∂':'d/d'}${symbol}`,integrate:`∫ d${symbol}`,solve:`${symbol} = ?`,solve_polynomial:`${symbol} = ? · CAS`})) {const control=contextual.querySelector(`[data-operation="${key}"]`)||secondary.querySelector(`[data-operation="${key}"]`);if(control)control.textContent=text;}}
  updateOperationLabels();
 
- if(c.dependencies?.length){const links=el('div',{class:'cell-dependencies'},el('span',{class:'small',text:t('references')}));for(const id of c.dependencies){const dependency=current.cells.find(c=>c.id===id);links.append(el('button',{type:'button',class:'reference-chip',onclick:()=>action(()=>selectCell(id)),text:dependency.name}));}form.append(links);form.append(el('details',{class:'resolved-definition'},el('summary',{text:t('resolved_definition')}),formula(c.resolved_mathml)));}
+
  if(c.calculation_error){form.append(el('div',{class:'calculation-error',role:'alert'},el('strong',{text:t('recalculation_failed')}),el('span',{text:t(c.calculation_error)})));}
- if(c.output){form.append(el('div',{class:'output'},el('div',{class:'output-header'},el('span',{text:t(c.output.operation)}),el('span',{class:`trust-badge ${c.output.trust}`,text:t(c.output.trust)})),el('div',{class:'equation-row'},el('span',{class:'equation-label',text:t('result')}),c.result_mathml?formula(c.result_mathml):el('div',{class:'numeric',text:c.result_text})),el('div',{class:'result-metadata'},el('span',{class:'conditions',text:c.output.conditions.map(conditionLabel).join(' · ')}),el('span',{class:'small',text:c.output.precision==='exact'?t('exact'):c.output.precision==='float64; no certified error bound'?t('float64'):c.output.precision}))));}else if(!c.calculation_error)form.append(el('div',{class:'small no-result',text:t('no_result')}));
+ if(c.output){
+  const conditions=c.output.conditions.map(condition=>el('li',{text:conditionLabel(condition)}));
+  const precision=c.output.precision==='exact'?t('exact'):c.output.precision==='float64; no certified error bound'?t('float64'):c.output.precision;
+  form.append(el('div',{class:'output'},
+   el('div',{class:'equation-row'},el('span',{class:'equation-label',text:t('result')}),
+    c.result_mathml?formula(c.result_mathml):el('div',{class:'numeric',text:c.result_text})),
+   conditions.length?el('div',{class:'result-conditions'},el('strong',{text:t('conditions')}),el('ul',{},...conditions)):null,
+   el('div',{class:'output-header'},el('span',{text:t(c.output.operation)}),el('span',{text:precision}),
+    el('span',{class:`trust-badge ${c.output.trust}`,text:t(c.output.trust)}))));
+ }else if(!c.calculation_error&&selected)form.append(el('div',{class:'small no-result',text:t('no_result')}));
+ form.append(more);
+ if(c.dependencies?.length){const links=el('div',{class:'cell-dependencies'},el('span',{class:'small',text:t('references')}));for(const id of c.dependencies){const dependency=current.cells.find(c=>c.id===id);links.append(el('button',{type:'button',class:'reference-chip',onclick:()=>action(()=>selectCell(id)),text:dependency.name}));}form.append(links);form.append(el('details',{class:'resolved-definition'},el('summary',{text:t('resolved_definition')}),formula(c.resolved_mathml)));}
 
  const note=el('textarea',{'aria-label':`${t('note')} ${c.id}`,rows:2,maxlength:4096,'data-focus':`note-${c.id}`,oninput:e=>remember(c.id,'note',e.target.value)});note.value=valueFor(c,'note');
  const noteKey=`${current.active}:${c.id}`;
@@ -298,6 +481,7 @@ function inspector(){
  if(selected){const nodeList=el('div',{class:'node-list'});if(inspection?.cell.id===selected.id){for(const {id,node,children}of inspection.nodes.slice(0,60)){const args=Array.isArray(node.args)?node.args:[];const refs=children||args.filter(x=>typeof x==='number');nodeList.append(el('div',{class:'node'},el('span',{class:'node-id',text:`#${id}`}),el('span',{text:node.op==='reference'?'@'+node.args:node.op==='symbol'||node.op==='number'||node.op==='constant'?String(node.args):node.op==='call'?node.args[0]:node.args?.variable?`${node.op} · ${node.args.variable}`:node.op==='matrix'?`${node.args.rows}×${node.args.cols}`:node.op}),el('span',{class:'edge',text:refs.map(i=>`#${i}`).join(' ← ')})))}}else for(const symbol of selected.symbols)nodeList.append(el('div',{class:'node',text:symbol}));diagnostics.append(nodeList);}
  out.append(disclosure('seg',el('span',{text:t('seg_diagnostics')}),diagnostics));
  const list=el('ol',{class:'history-list'});for(const h of current.history)list.append(el('li',{class:'history-item'},el('span',{text:commandLabel(h.command)}),el('span',{class:'small',text:`${t(h.actor)} · ${h.branch} · r${h.revision}`})));if(!current.history.length)list.append(el('li',{class:'small',text:t('no_history')}));
+ out.append(disclosure('history',el('span',{},icon('history'),el('span',{text:t('history')}),el('span',{class:'small',text:String(current.history.length)})),list));
  const mathjson=el('div',{},el('div',{class:'reproduction-tools'},button('export_mathjson','package',()=>action(async()=>{await flushDrafts();const path=await invoke('export_mathjson',{generation:current.generation,revision:current.revision});if(path)mathjsonPath=path; }),current.selected?{}:{disabled:''}),button('import_mathjson','open',()=>action(async()=>{await flushDrafts();const s=await invoke('import_mathjson',{generation:current.generation});if(s){accept(s);applyLayout(await invoke('reveal_notebook',{generation:current.generation}));}})),button('mathjson_help','info',()=>{})));
  if(mathjsonPath)mathjson.append(el('div',{class:'small reproduction-path',text:mathjsonPath}));
  out.append(disclosure('mathjson',el('span',{text:'MathJSON'}),mathjson));
@@ -306,12 +490,12 @@ function inspector(){
  out.append(disclosure('openmath',el('span',{text:'OpenMath'}),openmath));
  out.append(disclosure('cas',el('span',{text:'CAS · SymPy'}),casPanel()));
  out.append(disclosure('reproduction',el('span',{text:t('reproduction')}),reproductionPanel()));
- out.append(disclosure('history',el('span',{},icon('history'),el('span',{text:t('history')}),el('span',{class:'small',text:String(current.history.length)})),list));
+
  return out;
 }
 
 function conditionLabel(s){if(s==='real roots; rational factorization checked in Rust; linear/quadratic factors only; not a formal proof')return t('polynomial_roots_checked');if(s==='factorization over rationals; coefficient identity checked in Rust')return t('factor_checked');if(s==='real roots; symbolic solver, not a formal proof')return t('real_roots');if(s==='antiderivative; add arbitrary constant C')return t('antiderivative');return s.replace(/: (Unspecified|Real|Nonnegative|Positive|Complex|unspecified|real|nonnegative|positive|complex)(, nonzero)?$/,(_,d,n)=>': '+t(d.toLowerCase())+(n?', '+t('nonzero'):''))}
-function commandLabel(c){const key=c.method?.replace('math.','');return `${t(c.operation||({define:'source',define_latex:'source',assume:'assumptions',select:'objects',checkout:'branch',rename:'name'}[key]||key))}${c.name?` · ${c.name}`:''}${c.symbol?` · ${c.symbol}`:''}`}
+function commandLabel(c){const key=c.method?.replace('math.','');return `${t(c.operation||({define:'source',define_latex:'source',assume:'assumptions',branch_research:'research_approve_branch',select:'objects',checkout:'branch',rename:'name'}[key]||key))}${c.name?` · ${c.name}`:''}${c.symbol?` · ${c.symbol}`:''}`}
 function panel(name){if(name==='surface')return surfacePanel();const body=name==='objects'?objects():name==='notebook'?notebook():inspector();return el('section',{class:'panel'},header(name),body,footer(),el('div',{class:'dock-preview'}))}
 function surfaceSelect(id){return action(async()=>{surface=await invoke('surface_command',{command:{kind:'select',id:Number(id)}});})}
 function surfacePanel(){
@@ -376,6 +560,6 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape')root.querySelectorAl
 root.addEventListener('click',e=>{if(view==='comparison')return;const reference=e.target.closest?.('[data-reference]');if(reference){const cell=current.cells.find(c=>c.name===reference.dataset.reference);if(cell)action(()=>selectCell(cell.id));}});
 root.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.ctrlKey&&!e.metaKey&&e.target.matches?.('[data-reference]')){e.preventDefault();e.target.dispatchEvent(new MouseEvent('click',{bubbles:true}));}});
 document.addEventListener('keydown',e=>{if(view==='comparison')return;if((e.metaKey||e.ctrlKey)&&!e.shiftKey&&e.key.toLowerCase()==='n'){e.preventDefault();action(()=>fileAction('new_document'))} if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='o'){e.preventDefault();action(()=>fileAction('open_document'))} if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='s'){e.preventDefault();action(()=>fileAction(e.shiftKey?'save_as':'save'))}if((e.metaKey||e.ctrlKey)&&e.key==='z'&&!e.target.closest('input,textarea')){e.preventDefault();action(()=>mutate({method:e.shiftKey?'math.redo':'math.undo'}))}if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){const c=current.cells.find(c=>c.id===Number(e.target.closest('[data-cell]')?.dataset.cell));if(c){e.preventDefault();action(async()=>{await commit(c);await mutate({method:'math.transform',id:c.id,operation:'compute',variable:'x',bindings:{}})})}}});
-async function start(){if(!api){try{current=await(await fetch('./preview.json')).json();setLocale('en');layout={revision:0,locale:'en',floating:[],floating_groups:[],root:{kind:'split',first:{kind:'tabs',panels:['objects'],active:'objects'},second:{kind:'split',first:{kind:'tabs',panels:['notebook'],active:'notebook'},second:{kind:'tabs',panels:['inspector'],active:'inspector'}}}};render()}catch{root.textContent=t('preview')}return}
+async function start(){if(!api){try{current=await(await fetch('./preview.json')).json();layout={revision:0,locale,floating:[],floating_groups:[],root:{kind:'split',first:{kind:'tabs',panels:['objects'],active:'objects'},second:{kind:'split',first:{kind:'tabs',panels:['notebook'],active:'notebook'},second:{kind:'tabs',panels:['inspector'],active:'inspector'}}}};render()}catch{root.textContent=t('preview')}return}
  try{await api.event.listen('symbio://file-busy',e=>{root.inert=e.payload});if(view==='surface'){document.body.classList.add('surface-body');surface=await invoke('surface_state');await api.event.listen('symbio://surface-axes',e=>{surfaceAxes=e.payload;renderSurfaceAxes(root.querySelector('.surface-stage'),surfaceAxes,surface)});await api.event.listen('symbio://surface',e=>{if(current&&e.payload.generation!==current.generation)return;const previous=JSON.stringify([surface?.cell,surface?.comparisons]);surface=e.payload;if(previous!==JSON.stringify([surface.cell,surface.comparisons])&&!busy)render();else updateSurface()})}await api.event.listen('symbio://prepare-save',()=>{if(pendingDrafts()&&!busy)action(flushDrafts)});await api.event.listen('symbio://changed',e=>accept(e.payload));await api.event.listen('symbio://layout',e=>applyLayout(e.payload));await api.event.listen('symbio://close-blocked',()=>status('unsaved_changes'));await api.event.listen('symbio://panel-error',e=>status(e.payload));await api.event.listen('symbio://dock-preview',e=>document.body.dataset.drop=e.payload?.target===view?e.payload.zone:'');bindDock();if(!view.startsWith('split')){current=await invoke('snapshot');casRuntime=await invoke('cas_state');}await api.event.listen('symbio://cas',e=>{casRuntime=e.payload;casPathDraft=null;if(!busy)render()});applyLayout(await invoke('workspace_state'));render();refreshInspection();}catch(e){root.textContent=t(e.code||'error')};}
 start();

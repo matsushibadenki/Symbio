@@ -9,7 +9,7 @@
       },
       "name": "math_calculate",
       "title": "Calculate in a fresh SEG",
-      "description": "Evaluate or transform one Expression/LaTeX source using the bounded Rust kernel. Explicit assumptions, variable and numeric bindings. Returns typeset result, trust, precision, engine, conditions and SEG. Stateless: no documents, files, references to other calls, external CAS or network.",
+      "description": "Evaluate or transform one Expression/LaTeX source using the bounded Rust kernel. Explicit assumptions, variable and numeric bindings, and exact rational substitutions. Returns typeset result, trust, precision, engine, conditions and SEG. Stateless: no documents, files, references to other calls, external CAS or network.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -40,7 +40,8 @@
               "determinant",
               "inverse",
               "transpose",
-              "evaluate"
+              "evaluate",
+              "substitute"
             ],
             "default": "compute"
           },
@@ -105,6 +106,19 @@
             "propertyNames": {
               "pattern": "^[A-Za-z_][A-Za-z_0-9]{0,47}$"
             }
+          },
+          "exact_bindings": {
+            "type": "object",
+            "maxProperties": 64,
+            "additionalProperties": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "description": "Exact integer, decimal, or fraction strings for operation substitute. Leave variables you want to keep symbolic out of this object.",
+            "propertyNames": {
+              "pattern": "^[A-Za-z_][A-Za-z_0-9]{0,47}$"
+            }
           }
         },
         "allOf": [
@@ -123,6 +137,35 @@
             "else": {
               "properties": {
                 "bindings": {
+                  "maxProperties": 0
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "operation": {
+                  "const": "substitute"
+                }
+              },
+              "required": [
+                "operation"
+              ]
+            },
+            "then": {
+              "required": [
+                "exact_bindings"
+              ],
+              "properties": {
+                "exact_bindings": {
+                  "minProperties": 1
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "exact_bindings": {
                   "maxProperties": 0
                 }
               }
