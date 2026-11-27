@@ -141,3 +141,48 @@ with tempfile.TemporaryDirectory(prefix="symbio-mcp-branch-") as directory:
                              capture_output=True, text=True)
     assert unknown.returncode != 0 and not unknown.stdout and "does not exist" in unknown.stderr
 print("PASS: explicit saved branch selection and startup authorization boundary")
+
+with tempfile.TemporaryDirectory(prefix="symbio-mcp-follow-") as directory:
+    path = Path(directory) / "study.symbio"
+    subprocess.run([CLI, "init", path], capture_output=True, check=True)
+    with subprocess.Popen([CLI, "mcp", "--read-project", path, "--follow-saves"], text=True,
+                          stdin=subprocess.PIPE, stdout=subprocess.PIPE) as process:
+        rpc("initialize", {"protocolVersion": "2025-11-25", "capabilities": {},
+                           "clientInfo": {"name": "symbio-smoke", "version": "1"}})
+        send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+
+        def read_cell():
+            return rpc("tools/call", {"name": "math_read_notebook",
+                                      "arguments": {"cell_id": 1}})["result"]["structuredContent"]
+
+        def search(**arguments):
+            return rpc("tools/call", {"name": "math_read_notebook",
+                                      "arguments": arguments})["result"]["structuredContent"]
+
+        found = search(query="F")
+        assert found["cells"] == [{"id": 1, "name": "f"}] and "assumptions" not in found
+        assert search(query="unknown")["cells"] == []
+        assert read_cell()["revision"] == 0
+        commands = [
+            {"method": "math.define", "id": 1, "name": "f", "source": "x+42"},
+            {"method": "math.branch", "name": "other"},
+            {"method": "math.define", "id": 1, "name": "f", "source": "99"},
+        ]
+        requests = [{"expected_revision": rev, "actor": "human", "command": command}
+                    for rev, command in enumerate(commands)]
+        requests.append({"method": "math.save"})
+        saved = subprocess.run([CLI, "serve", path], text=True, capture_output=True, check=True,
+                               input="".join(json.dumps(row) + "\n" for row in requests))
+        assert all(json.loads(line)["ok"] for line in saved.stdout.splitlines())
+        fresh = read_cell()
+        assert fresh["branch"] == "main" and fresh["revision"] == 3
+        assert fresh["cell"]["source"] == "x+42"
+        assert search(cell_id=1, expected_revision=found["revision"])["error"]["code"] == "revision_conflict"
+        assert search(cell_id=1, expected_revision=fresh["revision"])["cell"]["source"] == "x+42"
+        replacement = path.with_name("different.symbio")
+        subprocess.run([CLI, "init", replacement], capture_output=True, check=True)
+        replacement.replace(path)
+        assert read_cell() == {"ok": False, "error": {"code": "notebook_unavailable"}}
+        process.stdin.close()
+        assert process.wait(timeout=10) == 0
+print("PASS: saved revision refresh stays pinned to the authorized branch and project")

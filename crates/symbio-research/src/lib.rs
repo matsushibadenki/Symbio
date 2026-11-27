@@ -1,5 +1,5 @@
 //! Bounded provider tool-calling loop. All mathematical tools execute in Rust.
-use crate::mcp;
+pub mod scratch;
 use reqwest::{Client, Url, redirect::Policy};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -106,7 +106,7 @@ pub async fn run(
             .resolve("localhost", std::net::SocketAddr::from(([127, 0, 0, 1], 0)));
     }
     let client = client.build().map_err(|_| "research_network_error")?;
-    let schema = mcp::tools().map_err(|_| "internal_error")?;
+    let schema = scratch::schema().map_err(|_| "internal_error")?;
     let tools: Vec<_> = schema["tools"]
         .as_array()
         .ok_or("internal_error")?
@@ -183,10 +183,9 @@ pub async fn run(
                 .unwrap_or(Value::Null);
             let tool = name.to_owned();
             let input = arguments.clone();
-            let result = tokio::task::spawn_blocking(move || mcp::call(&tool, input))
+            let result = tokio::task::spawn_blocking(move || scratch::execute(&tool, input))
                 .await
                 .map_err(|_| "internal_error")?
-                .map(|mut value| value["structuredContent"].take())
                 .unwrap_or_else(|_| json!({"ok":false,"error":{"code":"invalid_tool_call"}}));
             let feedback = json!({"ok":result["ok"] == true && result["cell"]["calculation_error"].is_null(),
                 "engine":result["engine"],

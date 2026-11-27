@@ -329,17 +329,17 @@ struct ResearchRequestState {
 #[tauri::command]
 async fn run_research(
     webview: tauri::Webview,
-    requests: tauri::State<'_, ResearchRequests>,
     request_id: String,
-    provider: symbio_cli::research::Provider,
+    provider: symbio_research::Provider,
     model: String,
     prompt: String,
     local_base: Option<String>,
     api_key: Option<String>,
-) -> Result<symbio_cli::research::Report, String> {
+) -> Result<symbio_research::Report, String> {
     if webview.label() != "notebook" || request_id.is_empty() || request_id.len() > 64 {
         return Err("forbidden".into());
     }
+    let requests = webview.state::<ResearchRequests>();
     let task = {
         let mut state = requests.0.lock().map_err(|_| "internal_error")?;
         if state.cancelled.as_deref() == Some(&request_id) {
@@ -349,7 +349,7 @@ async fn run_research(
             return Err("research_busy".into());
         }
         let task = tauri::async_runtime::spawn(async move {
-            symbio_cli::research::run(
+            symbio_research::run(
                 provider,
                 &model,
                 &prompt,

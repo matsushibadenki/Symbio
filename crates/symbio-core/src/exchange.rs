@@ -30,12 +30,8 @@ fn prepare(input: &MathInput) -> Result<AppCore> {
     if input.source.len() > 2048 || input.assumptions.len() > 64 || input.bindings.len() > 64 {
         return Err(Error::Limit);
     }
-    let mut project = Project::new("KOMYAKU equation")?;
-    project.graph = graph::Graph::default();
-    project.current_mut().cells.clear();
-    project.current_mut().selected = None;
+    let mut project = Project::empty("KOMYAKU equation")?;
     project.current_mut().assumptions = input.assumptions.clone();
-    project.next_cell = 1;
     let root = SourceFormat::Latex.parse(&mut project.graph, &input.source)?;
     project.current_mut().cells.push(Cell {
         id: 1,
@@ -53,8 +49,7 @@ fn prepare(input: &MathInput) -> Result<AppCore> {
     });
     project.current_mut().selected = Some(1);
     project.next_cell = 2;
-    let core = AppCore::new(project)?;
-    Ok(core)
+    AppCore::new(project)
 }
 
 /// Uses the exact same transactions as Symbio, without filesystem or network access.

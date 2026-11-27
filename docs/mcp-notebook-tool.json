@@ -1,6 +1,6 @@
 {
   "name": "math_read_notebook",
-  "description": "Read the single saved branch authorized at startup. Omit cell_id for cell IDs, names and branch assumptions. Include cell_id for the authored formula, direct dependencies and saved result. Notes, history and other branches are excluded.",
+  "description": "Read the single saved branch authorized at startup. Omit cell_id for cell IDs, names and branch assumptions. Include cell_id for the authored formula, direct dependencies and saved result. Use query to search names or expected_revision to require a particular saved revision. Notes, history and other branches are excluded.",
   "annotations": {
     "readOnlyHint": true,
     "destructiveHint": false,
@@ -10,8 +10,11 @@
   "inputSchema": {
     "type": "object",
     "properties": {
-      "cell_id": { "type": "integer", "minimum": 1 }
+      "cell_id": { "type": "integer", "minimum": 1 },
+      "query": { "type": "string", "minLength": 1, "maxLength": 48, "pattern": "^[ -~]*[^ ][ -~]*$" },
+      "expected_revision": { "type": "integer", "minimum": 0 }
     },
+    "not": { "required": ["query", "cell_id"] },
     "additionalProperties": false
   },
   "outputSchema": {

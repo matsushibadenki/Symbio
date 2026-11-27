@@ -2,19 +2,18 @@
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
-    collections::BTreeMap,
     io::{BufRead, Read, Write},
+    path::{Path, PathBuf},
 };
-use symbio_core::{
-    Actor, AppCore, Assumption, Command, ENGINE, Project, Request, Snapshot, SourceFormat,
-};
+use symbio_core::{AppCore, ProjectStore, Snapshot};
+use symbio_research::scratch;
 const VERSION: &str = "2025-11-25";
 const MAX_FRAME: usize = 65536;
 #[derive(Default)]
 struct Server {
     initialized: bool,
     ready: bool,
-    notebook: Option<Snapshot>,
+    notebook: Option<Notebook>,
 }
 fn error(id: Value, code: i32, message: &str) -> Value {
     json!({"jsonrpc":"2.0","id":id,"error":{"code":code,"message":message}})
@@ -22,149 +21,89 @@ fn error(id: Value, code: i32, message: &str) -> Value {
 fn result(id: Value, value: Value) -> Value {
     json!({"jsonrpc":"2.0","id":id,"result":value})
 }
-fn tool_result(value: Value, failed: bool) -> Value {
+fn tool_result(value: Value) -> Value {
+    let failed = value["ok"] == false;
     json!({"content":[{"type":"text","text":value.to_string()}],"structuredContent":value,"isError":failed})
 }
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Preview {
-    source: String,
+fn call(name: &str, arguments: Value) -> Result<Value, ()> {
+    scratch::execute(name, arguments)
+        .map(tool_result)
+        .map_err(|_| ())
 }
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Calculate {
-    source: String,
-    #[serde(default)]
-    source_format: SourceFormat,
-    #[serde(default = "compute")]
-    operation: String,
-    #[serde(default = "variable")]
-    variable: String,
-    #[serde(default)]
-    assumptions: BTreeMap<String, Assumption>,
-    #[serde(default)]
-    bindings: BTreeMap<String, f64>,
-    #[serde(default)]
-    exact_bindings: BTreeMap<String, String>,
-}
-fn compute() -> String {
-    "compute".into()
-}
-fn variable() -> String {
-    "x".into()
-}
-fn apply(core: &mut AppCore, command: Command) -> symbio_core::Result<()> {
-    core.apply(Request {
-        expected_revision: core.project().revision,
-        actor: Actor::Ai,
-        command,
-    })?;
-    Ok(())
-}
-fn calculate(args: Calculate) -> symbio_core::Result<Value> {
-    let mut core = AppCore::new(Project::empty("MCP scratch")?)?;
-    for (symbol, assumption) in args.assumptions {
-        apply(&mut core, Command::Assume { symbol, assumption })?;
-    }
-    let define = match args.source_format {
-        SourceFormat::Expression => Command::Define {
-            id: None,
-            name: "f".into(),
-            source: args.source,
-        },
-        SourceFormat::Latex => Command::DefineLatex {
-            id: None,
-            name: "f".into(),
-            source: args.source,
-        },
-    };
-    apply(&mut core, define)?;
-    let command = if args.operation == "substitute" {
-        Command::Substitute {
-            id: 1,
-            values: args.exact_bindings,
-        }
-    } else {
-        Command::Transform {
-            id: 1,
-            operation: args.operation,
-            variable: args.variable,
-            bindings: args.bindings,
-        }
-    };
-    apply(&mut core, command)?;
-    let cell = core.snapshot().cells.remove(0);
-    Ok(json!({"ok":true,"engine":ENGINE,"cell":cell,"seg":core.inspect(1)?}))
-}
-pub(crate) fn call(name: &str, arguments: Value) -> Result<Value, ()> {
-    let computed = match name {
-        "math_preview_latex" => {
-            let args: Preview = serde_json::from_value(arguments).map_err(|_| ())?;
-            if args.source.is_empty() || args.source.len() > 2048 {
-                return Err(());
-            }
-            symbio_core::latex::preview(&args.source).and_then(|p| {
-                Ok(json!({"ok":true,"engine":ENGINE,"preview":serde_json::to_value(p)?}))
-            })
-        }
-        "math_calculate" => {
-            let args: Calculate = serde_json::from_value(arguments).map_err(|_| ())?;
-            if args.source.is_empty()
-                || args.source.len() > 2048
-                || args.assumptions.len() > 64
-                || args.bindings.len() > 64
-                || args.exact_bindings.len() > 64
-                || (args.operation == "substitute") == args.exact_bindings.is_empty()
-                || (!args.bindings.is_empty() && args.operation != "evaluate")
-                || !symbio_core::graph::valid_symbol(&args.variable)
-                || ![
-                    "compute",
-                    "simplify",
-                    "differentiate",
-                    "integrate",
-                    "expand",
-                    "solve",
-                    "determinant",
-                    "inverse",
-                    "transpose",
-                    "evaluate",
-                    "substitute",
-                ]
-                .contains(&args.operation.as_str())
-            {
-                return Err(());
-            }
-            calculate(args)
-        }
-        _ => return Err(()),
-    };
-    Ok(match computed {
-        Ok(value) => tool_result(value, false),
-        Err(e) => tool_result(
-            json!({"ok":false,"engine":ENGINE,"error":{"code":e.code(),"message":e.to_string()}}),
-            true,
-        ),
-    })
-}
-pub(crate) fn tools() -> serde_json::Result<Value> {
-    serde_json::from_str(include_str!("../../../docs/mcp-tools.json"))
-}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct NotebookRead {
     cell_id: Option<u64>,
+    query: Option<String>,
+    expected_revision: Option<u64>,
 }
 
 const NOTEBOOK_TOOL: &str = "math_read_notebook";
 
-fn read_notebook(notebook: &Snapshot, args: Value) -> Result<Value, ()> {
+struct Notebook {
+    snapshot: Snapshot,
+    follow_path: Option<PathBuf>,
+}
+
+impl Notebook {
+    fn refresh(&self) -> symbio_core::Result<Option<Snapshot>> {
+        let Some(path) = &self.follow_path else {
+            return Ok(None);
+        };
+        let mut project = ProjectStore::read_snapshot(path)?;
+        if project.id != self.snapshot.project_id
+            || !project.branches.contains_key(&self.snapshot.active)
+        {
+            return Err(symbio_core::Error::ExternalChange);
+        }
+        project.active.clone_from(&self.snapshot.active);
+        Ok(Some(AppCore::new(project)?.snapshot()))
+    }
+}
+
+fn read_notebook(access: &Notebook, args: Value) -> Result<Value, ()> {
     if args
         .get("cell_id")
         .is_some_and(|value| value.as_u64().is_none_or(|id| id == 0))
     {
         return Err(());
     }
+    if args
+        .get("expected_revision")
+        .is_some_and(|value| !value.is_u64())
+        || args.get("query").is_some_and(|value| {
+            value.as_str().is_none_or(|value| {
+                value.len() > 48 || !value.bytes().all(|byte| (b' '..=b'~').contains(&byte))
+            })
+        })
+    {
+        return Err(());
+    }
     let args: NotebookRead = serde_json::from_value(args).map_err(|_| ())?;
+    let query = args.query.as_deref().map(str::trim);
+    if query.is_some_and(|query| query.is_empty() || query.len() > 48)
+        || (query.is_some() && args.cell_id.is_some())
+    {
+        return Err(());
+    }
+    let fresh = match access.refresh() {
+        Ok(fresh) => fresh,
+        Err(_) => {
+            return Ok(tool_result(
+                json!({"ok":false,"error":{"code":"notebook_unavailable"}}),
+            ));
+        }
+    };
+    let notebook = fresh.as_ref().unwrap_or(&access.snapshot);
+    if args
+        .expected_revision
+        .is_some_and(|revision| revision != notebook.revision)
+    {
+        return Ok(tool_result(
+            json!({"ok":false,"error":{"code":"revision_conflict"}}),
+        ));
+    }
     let mut data = json!({
         "ok": true, "branch": notebook.active, "revision": notebook.revision,
     });
@@ -172,7 +111,6 @@ fn read_notebook(notebook: &Snapshot, args: Value) -> Result<Value, ()> {
         let Some(cell) = notebook.cells.iter().find(|view| view.cell.id == id) else {
             return Ok(tool_result(
                 json!({"ok":false,"error":{"code":"cell_not_found"}}),
-                true,
             ));
         };
         data["cell"] = json!({
@@ -187,21 +125,29 @@ fn read_notebook(notebook: &Snapshot, args: Value) -> Result<Value, ()> {
             "dependencies": cell.dependencies,
         });
     } else {
-        data["assumptions"] = serde_json::to_value(&notebook.assumptions).map_err(|_| ())?;
+        if query.is_none() {
+            data["assumptions"] = serde_json::to_value(&notebook.assumptions).map_err(|_| ())?;
+        }
+        let query = query.map(str::to_ascii_lowercase);
         data["cells"] = Value::Array(
             notebook
                 .cells
                 .iter()
+                .filter(|view| {
+                    query
+                        .as_ref()
+                        .is_none_or(|query| view.cell.name.to_ascii_lowercase().contains(query))
+                })
                 .map(|view| json!({"id":view.cell.id,"name":view.cell.name}))
                 .collect(),
         );
     }
-    Ok(tool_result(data, false))
+    Ok(tool_result(data))
 }
 
 impl Server {
     fn tool_schema(&self) -> Result<Value, ()> {
-        let mut schema = tools().map_err(|_| ())?;
+        let mut schema = scratch::schema().map_err(|_| ())?;
         if self.notebook.is_some() {
             let tool = serde_json::from_str(include_str!("../../../docs/mcp-notebook-tool.json"))
                 .map_err(|_| ())?;
@@ -317,10 +263,39 @@ pub fn serve(
     serve_snapshot(input, &mut output, None)
 }
 
-pub fn serve_snapshot(
+pub fn serve_project(
+    input: impl BufRead,
+    output: impl Write,
+    path: impl AsRef<Path>,
+    branch: Option<&str>,
+    follow: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let path = path.as_ref();
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let path = parent
+        .canonicalize()?
+        .join(path.file_name().ok_or("invalid project path")?);
+    let mut project = ProjectStore::read_snapshot(&path)?;
+    if let Some(branch) = branch {
+        if !project.branches.contains_key(branch) {
+            return Err("the requested saved branch does not exist".into());
+        }
+        project.active = branch.into();
+    }
+    let notebook = Notebook {
+        snapshot: AppCore::new(project)?.snapshot(),
+        follow_path: follow.then_some(path),
+    };
+    serve_snapshot(input, output, Some(notebook))
+}
+
+fn serve_snapshot(
     input: impl BufRead,
     mut output: impl Write,
-    notebook: Option<Snapshot>,
+    notebook: Option<Notebook>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut input = input;
     let mut server = Server {

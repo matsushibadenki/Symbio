@@ -1,12 +1,175 @@
-// Adapted from ATOM's native WebView docking controller. Rust owns the tree.
-import {el,invoke,action,getLayout,getView,dockCommand,applyLayout} from './app.js';
-import {t} from './i18n.js';import {icon} from './icons.js';
-const nodes=(node,kind)=>!node?[]:[...(node.kind===kind?[node]:[]),...(node.kind==='split'?[...nodes(node.first,kind),...nodes(node.second,kind)]:[])];
-let drag=null,dragQueue=Promise.resolve(),dragPending=false,split=null,splitQueue=Promise.resolve(),splitPending=false;
-export function renderTabs(panel){const s=getLayout();const group=nodes(s?.root,'tabs').find(n=>n.panels.includes(panel))||s?.floating_groups.find(g=>g.panels.includes(panel));const tabs=el('div',{class:'tabs',role:'tablist'});for(const p of group?.panels||[panel]){const tab=el('button',{class:'tab',role:'tab','aria-selected':p===(group?.active||panel),title:`${t(p)} · ${t('drag')}`},icon(p),el('span',{text:t(p)}));tab.onpointerdown=e=>{if(e.button!==0||!s||!window.__TAURI__)return;e.preventDefault();drag={element:tab,panel:p,id:e.pointerId,x:e.clientX,y:e.clientY,active:false,revision:s.revision};tab.setPointerCapture(e.pointerId);};tab.onpointermove=async e=>{if(!drag)return;if(Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>6)drag.active=true;if(!drag.active||dragPending)return;dragPending=true;tab.classList.add('dragging');try{dragQueue=invoke('panel_drag',{panel:p,phase:'preview',pointer:[e.clientX,e.clientY],expectedRevision:drag.revision});await dragQueue}catch{}finally{dragPending=false}};tab.onpointerup=e=>{const d=clearDrag();if(!d)return;const pointer=[e.clientX,e.clientY];if(d.active)action(async()=>{await dragQueue.catch(()=>{});await invoke('panel_drag',{panel:p,phase:'drop',pointer,expectedRevision:d.revision})});else dockCommand({kind:'select',panel:p});};tab.onpointercancel=cancelDrag;tab.onclick=e=>{if(e.detail===0)dockCommand({kind:'select',panel:p})};tab.onkeydown=e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key)||!group)return;e.preventDefault();let i=group.panels.indexOf(p);i=e.key==='Home'?0:e.key==='End'?group.panels.length-1:(i+(e.key==='ArrowLeft'?-1:1)+group.panels.length)%group.panels.length;dockCommand({kind:'select',panel:group.panels[i]})};tabs.append(tab)}return tabs}
-function clearDrag(){const d=drag;drag=null;if(d?.element.hasPointerCapture(d.id))d.element.releasePointerCapture(d.id);d?.element.classList.remove('dragging');return d}
-function cancelDrag(){const d=clearDrag();if(d)dragQueue.catch(()=>{}).then(()=>invoke('panel_drag',{panel:d.panel,phase:'cancel',pointer:null,expectedRevision:d.revision})).catch(()=>{})}
-function clearSplit(){const d=split;split=null;if(d?.element.hasPointerCapture(d.pointerId))d.element.releasePointerCapture(d.pointerId);return d}
-function cancelSplit(){const d=clearSplit();if(d)splitQueue.catch(()=>{}).then(()=>invoke('split_resize',{id:d.id,phase:'cancel',pointer:null,ratio:null,expectedRevision:d.revision})).catch(()=>{})}
-export function bindSplitter(){const s=getLayout(),entry=nodes(s?.root,'split')[Number(getView().slice(-1))];const n=el('button',{class:'splitter',role:'separator','aria-label':t('resize'),'aria-valuemin':10,'aria-valuemax':90,'aria-valuenow':Math.round((entry?.ratio||.5)*100),'aria-orientation':entry?.axis==='horizontal'?'vertical':'horizontal','data-axis':entry?.axis||'horizontal'});n.onpointerdown=e=>{if(e.button!==0||!entry)return;e.preventDefault();split={element:n,pointerId:e.pointerId,id:entry.id,revision:s.revision};n.setPointerCapture(e.pointerId)};n.onpointermove=async e=>{if(!split||splitPending)return;splitPending=true;try{splitQueue=invoke('split_resize',{id:split.id,phase:'preview',pointer:[e.clientX,e.clientY],ratio:null,expectedRevision:split.revision});await splitQueue}catch{}finally{splitPending=false}};n.onpointerup=e=>{const d=clearSplit();if(!d)return;const pointer=[e.clientX,e.clientY];action(async()=>{await splitQueue.catch(()=>{});try{applyLayout(await invoke('split_resize',{id:d.id,phase:'commit',pointer,ratio:null,expectedRevision:d.revision}))}catch(error){await invoke('split_resize',{id:d.id,phase:'cancel',pointer:null,ratio:null,expectedRevision:d.revision}).catch(()=>{});throw error;}})};n.onpointercancel=cancelSplit;n.onkeydown=e=>{if(!entry||!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key))return;e.preventDefault();const delta=['ArrowLeft','ArrowUp'].includes(e.key)?-.02:.02;action(async()=>applyLayout(await invoke('split_resize',{id:entry.id,phase:'commit',pointer:null,ratio:Math.max(.1,Math.min(.9,entry.ratio+delta)),expectedRevision:s.revision})))};return n}
-export function bindDock(){document.addEventListener('keydown',e=>{if(e.key==='Escape'){cancelDrag();cancelSplit()}});window.addEventListener('blur',()=>{cancelDrag();cancelSplit()})}
+// Adapted from ATOM's native WebView docking controller. Rust owns the layout tree.
+import {el} from './dom.js';
+import {t} from './i18n.js';
+import {icon} from './icons.js';
+
+function nodes(node, kind) {
+  if (!node) return [];
+  const matches = node.kind === kind ? [node] : [];
+  if (node.kind === 'split') matches.push(...nodes(node.first, kind), ...nodes(node.second, kind));
+  return matches;
+}
+
+function capture(element, event, revision) {
+  event.preventDefault();
+  element.setPointerCapture(event.pointerId);
+  return {element, pointerId: event.pointerId, revision, preview: Promise.resolve(), pending: false};
+}
+
+function release(gesture) {
+  if (gesture.element.hasPointerCapture(gesture.pointerId)) {
+    gesture.element.releasePointerCapture(gesture.pointerId);
+  }
+}
+
+// The final drop or resize must follow the last native preview, even when it failed.
+function preview(gesture, send) {
+  if (gesture.pending) return;
+  gesture.pending = true;
+  gesture.preview = send().catch(() => {}).finally(() => { gesture.pending = false; });
+}
+
+export function createDockController({getLayout, view, native, invoke, action, dockCommand, applyLayout}) {
+  let drag = null;
+  let split = null;
+
+  function endDrag() {
+    if (!drag) return null;
+    const gesture = drag;
+    drag = null;
+    release(gesture);
+    gesture.element.classList.remove('dragging');
+    return gesture;
+  }
+
+  function endSplit() {
+    if (!split) return null;
+    const gesture = split;
+    split = null;
+    release(gesture);
+    return gesture;
+  }
+
+  function panelDrag(gesture, phase, pointer) {
+    return invoke('panel_drag', {panel: gesture.panel, phase, pointer, expectedRevision: gesture.revision});
+  }
+
+  function resize(id, expectedRevision, phase, pointer = null, ratio = null) {
+    return invoke('split_resize', {id, expectedRevision, phase, pointer, ratio});
+  }
+
+  function cancelDrag() {
+    const gesture = endDrag();
+    if (gesture) gesture.preview.then(() => panelDrag(gesture, 'cancel', null)).catch(() => {});
+  }
+
+  function cancelSplit() {
+    const gesture = endSplit();
+    if (gesture) gesture.preview.then(() => resize(gesture.id, gesture.revision, 'cancel')).catch(() => {});
+  }
+
+  function renderTabs(panel) {
+    const layout = getLayout();
+    const group = nodes(layout?.root, 'tabs').find(node => node.panels.includes(panel))
+      || layout?.floating_groups.find(node => node.panels.includes(panel));
+    const panels = group?.panels || [panel];
+    const tabs = el('div', {class: 'tabs', role: 'tablist'});
+    for (const [index, name] of panels.entries()) {
+      const tab = el('button', {
+        class: 'tab', role: 'tab', 'aria-selected': name === (group?.active || panel),
+        title: t(name) + ' · ' + t('drag'),
+      }, icon(name), el('span', {text: t(name)}));
+      tab.onpointerdown = event => {
+        if (event.button !== 0 || drag || !layout || !native) return;
+        drag = {...capture(tab, event, layout.revision), panel: name, x: event.clientX, y: event.clientY, active: false};
+      };
+      tab.onpointermove = event => {
+        if (drag?.element !== tab || event.pointerId !== drag.pointerId) return;
+        if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) > 6) drag.active = true;
+        if (drag.active) {
+          tab.classList.add('dragging');
+          preview(drag, () => panelDrag(drag, 'preview', [event.clientX, event.clientY]));
+        }
+      };
+      tab.onpointerup = event => {
+        if (drag?.element !== tab || event.pointerId !== drag.pointerId) return;
+        const gesture = endDrag();
+        if (gesture.active) {
+          const pointer = [event.clientX, event.clientY];
+          action(async () => {
+            await gesture.preview;
+            await panelDrag(gesture, 'drop', pointer);
+          });
+        } else dockCommand({kind: 'select', panel: name});
+      };
+      tab.onpointercancel = event => {
+        if (drag?.pointerId === event.pointerId && drag.element === tab) cancelDrag();
+      };
+      tab.onclick = event => {
+        if (event.detail === 0) dockCommand({kind: 'select', panel: name});
+      };
+      tab.onkeydown = event => {
+        if (!group || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault();
+        let next = (index + (event.key === 'ArrowLeft' ? -1 : 1) + panels.length) % panels.length;
+        if (event.key === 'Home') next = 0;
+        if (event.key === 'End') next = panels.length - 1;
+        dockCommand({kind: 'select', panel: panels[next]});
+      };
+      tabs.append(tab);
+    }
+    return tabs;
+  }
+
+  function bindSplitter() {
+    const layout = getLayout();
+    const entry = nodes(layout?.root, 'split')[Number(view.slice(-1))];
+    const element = el('button', {
+      class: 'splitter', role: 'separator', 'aria-label': t('resize'),
+      'aria-valuemin': 10, 'aria-valuemax': 90, 'aria-valuenow': Math.round((entry?.ratio || 0.5) * 100),
+      'aria-orientation': entry?.axis === 'horizontal' ? 'vertical' : 'horizontal',
+      'data-axis': entry?.axis || 'horizontal',
+    });
+    element.onpointerdown = event => {
+      if (event.button !== 0 || split || !entry) return;
+      split = {...capture(element, event, layout.revision), id: entry.id};
+    };
+    element.onpointermove = event => {
+      if (split?.element !== element || split.pointerId !== event.pointerId) return;
+      preview(split, () => resize(split.id, split.revision, 'preview', [event.clientX, event.clientY]));
+    };
+    element.onpointerup = event => {
+      if (split?.element !== element || split.pointerId !== event.pointerId) return;
+      const gesture = endSplit();
+      const pointer = [event.clientX, event.clientY];
+      action(async () => {
+        await gesture.preview;
+        try {
+          applyLayout(await resize(gesture.id, gesture.revision, 'commit', pointer));
+        } catch (error) {
+          await resize(gesture.id, gesture.revision, 'cancel').catch(() => {});
+          throw error;
+        }
+      });
+    };
+    element.onpointercancel = event => {
+      if (split?.pointerId === event.pointerId && split.element === element) cancelSplit();
+    };
+    element.onkeydown = event => {
+      if (!entry || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+      event.preventDefault();
+      const delta = ['ArrowLeft', 'ArrowUp'].includes(event.key) ? -0.02 : 0.02;
+      const ratio = Math.max(0.1, Math.min(0.9, entry.ratio + delta));
+      action(async () => applyLayout(await resize(entry.id, layout.revision, 'commit', null, ratio)));
+    };
+    return element;
+  }
+
+  function bindDock() {
+    const cancel = () => { cancelDrag(); cancelSplit(); };
+    document.addEventListener('keydown', event => { if (event.key === 'Escape') cancel(); });
+    window.addEventListener('blur', cancel);
+  }
+
+  return {bindDock, bindSplitter, renderTabs};
+}

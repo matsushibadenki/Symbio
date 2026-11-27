@@ -26,9 +26,15 @@ See [AI research setup](ai-research.md#codex-and-standalone-antigravity) for Cod
 
 ## Optional notebook access
 
-Launch with `mcp --read-project /absolute/path/to/study.symbio` to authorize the saved active branch for this process. Append `--branch NAME` to authorize a specific saved branch instead. Branch names are matched exactly, and an unknown name prevents startup. The selection applies to the MCP process only. Use only with a trusted MCP client. The client or its model may receive the returned formulas, results, and mathematical assumptions. Restart the MCP session after saving to load a new snapshot.
+Launch with `mcp --read-project /absolute/path/to/study.symbio` to authorize the saved active branch for this process. Append `--branch NAME` to authorize a specific saved branch instead. Branch names are matched exactly, and an unknown name prevents startup. The selection applies to the MCP process only. Use only with a trusted MCP client. The client or its model may receive the returned formulas, results, and mathematical assumptions. In the default snapshot mode, restart the MCP session after saving to load a new snapshot.
+
+Append `--follow-saves` to read the latest saved revision on each notebook call. The project identity and initial branch remain fixed even if a later save makes another branch active. If the file is unavailable, belongs to another project, or no longer contains that branch, the tool returns `notebook_unavailable`. Unsaved desktop edits remain outside the sharing scope.
+
 
 `math_read_notebook` lists cell IDs, names and branch assumptions when called with `{}`. Pass `{"cell_id":1}` to read that cell's authored formula, dependencies and saved result metadata. The capability excludes research notes, ink, history, and other branches. It takes no path from the model, creates no project lock, and offers no document writes. Scratch math tools still have independent state. See the [notebook tool schema](mcp-notebook-tool.json).
+
+Search cell names with `{"query":"energy"}` for an ASCII case-insensitive substring match. Search returns only matching IDs and names alongside the branch and revision. Pass that revision as `expected_revision` on a subsequent cell read to detect a save between discovery and retrieval. A mismatch returns `revision_conflict`.
+
 
 ## Tools
 

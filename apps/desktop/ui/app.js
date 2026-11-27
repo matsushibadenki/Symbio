@@ -9,9 +9,13 @@ import {renderSurfaceAxes} from './surface-axes.js';
 import {dependencyLayout} from './dependency-layout.js';
 import {bindLatexPreview} from './latex-preview.js';
 import {createMathKeyboard} from './math-keyboard.js';
-import {bindDock,renderTabs,bindSplitter} from './dock.js';
+import {createDockController} from './dock.js';
+import {el} from './dom.js';
 const api=window.__TAURI__;const view=new URLSearchParams(location.search).get('view')||'preview';
 const root=document.getElementById('app');let current=null,layout=null,busy=false,statusKey='ready',detail='',inspection=null,inspectionRevision=-1;
+const {bindDock, renderTabs, bindSplitter} = createDockController({
+  getLayout: () => layout, view, native: Boolean(api), invoke, action, dockCommand, applyLayout,
+});
 let surface=null,surfaceAxes=null;
 let casRuntime=null,casPathDraft=null,allowCasReplay=false;
 let graphEditing=null,comparisonTarget=null,reproductionReport=null,reproductionPath=null,mathjsonPath=null,openmathPath=null;
@@ -23,8 +27,7 @@ const drafts=new Map();let draftQueue=Promise.resolve();
 function pendingDrafts(){return inkPending||current?.cells.some(c=>["name","source","source_format","note"].some(k=>drafts.get(c.id)?.[k]!==undefined&&drafts.get(c.id)[k]!==c[k]))||false}
 function publishDrafts(){if(api){const pending=pendingDrafts();draftQueue=draftQueue.catch(()=>{}).then(()=>invoke("set_draft",{pending}));}return draftQueue}
 async function flushDrafts(){for(const c of [...current.cells]){await commit(c);const note=drafts.get(c.id)?.note;if(note!==undefined&&note!==c.note){await mutate({method:"math.note",id:c.id,text:note});delete drafts.get(c.id).note;}}await publishDrafts();}
-export function el(tag,attrs={},...children){const n=document.createElement(tag);for(const [key,val]of Object.entries(attrs)){if(key==='class')n.className=val;else if(key.startsWith('on'))n.addEventListener(key.slice(2),val);else if(key==='text')n.textContent=val;else if(key==='value')n.value=val;else if(key==='checked')n.checked=val;else if(val!==null)n.setAttribute(key,String(val));}for(const c of children.flat()){if(c!==null&&c!==undefined)n.append(typeof c==='string'?document.createTextNode(c):c)}return n}
-export function button(key,shape,fn,options={}){return el('button',{type:'button',title:t(key),'aria-label':t(key),onclick:fn,...options},shape?icon(shape):t(key))}
+function button(key,shape,fn,options={}){return el('button',{type:'button',title:t(key),'aria-label':t(key),onclick:fn,...options},shape?icon(shape):t(key))}
 const label=(key,node)=>el('label',{},el('span',{class:'small',text:t(key)}),node);
 function field(key,value,attrs={}){return el('input',{'aria-label':t(key),title:t(key),value,...attrs})}
 function formula(html){
@@ -76,16 +79,15 @@ function showBranchComparison(){
  target.addEventListener('change',()=>{comparisonTarget=target.value;load()});root.replaceChildren(dialog);load();
 }
 
-export async function invoke(name,args){if(current&&name==='surface_command')args={...args,generation:current.generation,revision:current.revision};if(current&&['set_draft','preview_latex','inspect','show_plot'].includes(name))args={...args,generation:current.generation};return api.core.invoke(name,args)}
-export function getLayout(){return layout}export function getView(){return view}
+async function invoke(name,args){if(current&&name==='surface_command')args={...args,generation:current.generation,revision:current.revision};if(current&&['set_draft','preview_latex','inspect','show_plot'].includes(name))args={...args,generation:current.generation};return api.core.invoke(name,args)}
 function status(key,errorDetail=''){statusKey=key;detail=errorDetail;document.querySelectorAll('.status,.surface-status').forEach(n=>{n.textContent=t(key)+(errorDetail?` ${errorDetail}`:'');n.dataset.error=String(!['ready','working'].includes(key));});}
-export async function action(fn){if(busy||!api)return;busy=true;document.querySelectorAll('button').forEach(b=>b.disabled=true);status('working');try{await draftQueue;await fn();status('ready')}catch(e){status(e.code||'error',e.detail||e.message||'');if(['revision_conflict','document_changed'].includes(e.code))accept(await invoke('snapshot'));if(['layout_conflict','panel_error','layout_save_failed'].includes(e.code))applyLayout(await invoke('workspace_state'));}finally{busy=false;render();}}
+async function action(fn){if(busy||!api)return;busy=true;document.querySelectorAll('button').forEach(b=>b.disabled=true);status('working');try{await draftQueue;await fn();status('ready')}catch(e){status(e.code||'error',e.detail||e.message||'');if(['revision_conflict','document_changed'].includes(e.code))accept(await invoke('snapshot'));if(['layout_conflict','panel_error','layout_save_failed'].includes(e.code))applyLayout(await invoke('workspace_state'));}finally{busy=false;render();}}
 async function mutate(command){const s=await invoke('edit',{generation:current.generation,request:{expected_revision:current.revision,actor:'human',command}});accept(s);return s}
-export function dockCommand(command){return action(async()=>applyLayout(await invoke('workspace_command',{command,expectedRevision:layout.revision})))}
+function dockCommand(command){return action(async()=>applyLayout(await invoke('workspace_command',{command,expectedRevision:layout.revision})))}
 function accept(s){const decision=compareDocumentSnapshot(current,s);if(decision==='ignore')return;if(current&&decision!=='replace'&&current.active===s.active&&s.cells.length>current.cells.length&&!current.cells.some(c=>c.id===s.selected))expandedEditors.add(`${s.active_document??s.project_id}:${s.active}:editor-${s.selected}`);if(current?.selected!==s.selected||decision==='replace')revealCell=s.selected;if(decision==='replace'){reproductionReport=null;reproductionPath=null;mathjsonPath=null;openmathPath=null;surface=null;surfaceAxes=null;drafts.clear();notePreviews.clear();expandedEditors.clear();graphEditing=null;keyboard=null;inspection=null;inspectionRevision=-1;document.querySelectorAll('dialog').forEach(d=>d.close());}current=s;if(statusKey==='unsaved_changes'&&!s.dirty&&!pendingDrafts()){statusKey='ready';detail=''}if(!busy)render();refreshInspection();}
 async function fileAction(command){await flushDrafts();if(command==='save'&&!current.path)command='save_as';const s=await invoke(command,{generation:current.generation});if(s)accept(s);}
 
-export function applyLayout(s){if(layout&&s.revision<=layout.revision)return;layout=s;setLocale(s.locale);if(view==='notebook')revealCell=current?.selected;if(!busy)render();}
+function applyLayout(s){if(layout&&s.revision<=layout.revision)return;layout=s;setLocale(s.locale);if(view==='notebook')revealCell=current?.selected;if(!busy)render();}
 async function refreshInspection(){if(!api||!current?.selected||view!=='inspector'||inspectionRevision===current.revision)return;const revision=current.revision,generation=current.generation;inspectionRevision=revision;try{const data=await invoke('inspect',{id:current.selected});if(current.revision===revision&&current.generation===generation){inspection=data;if(!busy)render();}}catch(e){inspection=null;status(e.code||'error')}}
 function remember(id,part,value){const d=drafts.get(id)||{};d[part]=value;drafts.set(id,d);if(["name","source","source_format","note"].includes(part))publishDrafts()}
 function valueFor(c,part){return drafts.get(c.id)?.[part]??c[part]??(part==='source_format'?'expression':undefined)}

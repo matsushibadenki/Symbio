@@ -3592,10 +3592,10 @@ dependencies = [
 name = "symbio-cli"
 version = "0.1.0"
 dependencies = [
- "reqwest",
  "serde",
  "serde_json",
  "symbio-core",
+ "symbio-research",
  "tokio",
 ]
 
@@ -3623,9 +3623,9 @@ dependencies = [
  "objc2-app-kit",
  "serde",
  "serde_json",
- "symbio-cli",
  "symbio-core",
  "symbio-handwriting",
+ "symbio-research",
  "sys-locale",
  "tauri",
  "tauri-build",
@@ -3645,6 +3645,17 @@ dependencies = [
  "ort",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "symbio-research"
+version = "0.1.0"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+ "symbio-core",
+ "tokio",
 ]
 
 [[package]]

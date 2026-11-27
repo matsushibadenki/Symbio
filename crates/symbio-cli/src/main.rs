@@ -38,27 +38,34 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     if args.first().is_some_and(|command| command == "mcp") {
-        let (path, branch) = match args.as_slice() {
-            [_] => return mcp::serve(io::stdin().lock(), io::stdout().lock()),
-            [_, flag, path] if flag == "--read-project" => (path, None),
-            [_, flag, path, branch_flag, branch]
+        let mut options = &args[1..];
+        if options.is_empty() {
+            return mcp::serve(io::stdin().lock(), io::stdout().lock());
+        }
+        let follow = matches!(options.len(), 3 | 5)
+            && options.last().is_some_and(|arg| arg == "--follow-saves");
+        if follow {
+            options = &options[..options.len() - 1];
+        }
+        let (path, branch) = match options {
+            [flag, path] if flag == "--read-project" => (path, None),
+            [flag, path, branch_flag, branch]
                 if flag == "--read-project" && branch_flag == "--branch" =>
             {
-                (path, Some(branch))
+                (path, Some(branch.as_str()))
             }
-            _ => {
-                return Err("usage: symbio-cli mcp [--read-project PROJECT [--branch NAME]]".into());
-            }
+            _ => return Err(
+                "usage: symbio-cli mcp [--read-project PROJECT [--branch NAME] [--follow-saves]]"
+                    .into(),
+            ),
         };
-        let mut project = ProjectStore::read_snapshot(path)?;
-        if let Some(branch) = branch {
-            if !project.branches.contains_key(branch) {
-                return Err("the requested saved branch does not exist".into());
-            }
-            project.active.clone_from(branch);
-        }
-        let notebook = AppCore::new(project)?.snapshot();
-        return mcp::serve_snapshot(io::stdin().lock(), io::stdout().lock(), Some(notebook));
+        return mcp::serve_project(
+            io::stdin().lock(),
+            io::stdout().lock(),
+            path,
+            branch,
+            follow,
+        );
     }
     if args
         .first()
@@ -123,7 +130,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     if args.len() != 2 || !["init", "inspect", "serve"].contains(&args[0].as_str()) {
-        return Err("usage: symbio-cli mcp [--read-project PROJECT [--branch NAME]] | research PROVIDER MODEL [LOCAL_BASE_URL] | import-openmath XML NEW_PROJECT | export-openmath PROJECT XML | import-mathjson JSON NEW_PROJECT | export-mathjson PROJECT JSON | init|inspect|serve PROJECT | export-reproduction PROJECT PACKAGE | verify-reproduction PACKAGE [--allow-cas]".into());
+        return Err("usage: symbio-cli mcp [--read-project PROJECT [--branch NAME] [--follow-saves]] | research PROVIDER MODEL [LOCAL_BASE_URL] | import-openmath XML NEW_PROJECT | export-openmath PROJECT XML | import-mathjson JSON NEW_PROJECT | export-mathjson PROJECT JSON | init|inspect|serve PROJECT | export-reproduction PROJECT PACKAGE | verify-reproduction PACKAGE [--allow-cas]".into());
     }
     let mut store = ProjectStore::open(&args[1])?;
     let project = match store.load()? {

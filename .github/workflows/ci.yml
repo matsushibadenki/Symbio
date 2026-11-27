@@ -22,9 +22,9 @@ jobs:
       - name: Rust formatting and lint
         run: |
           cargo +stable fmt --all -- --check
-          cargo +stable clippy --locked -p symbio-core -p symbio-cli -p symbio-desktop --all-targets -- -D warnings
-      - name: Core and CLI tests
-        run: cargo +stable test --locked -p symbio-core -p symbio-cli
+          cargo +stable clippy --locked -p symbio-core -p symbio-research -p symbio-cli -p symbio-desktop --all-targets -- -D warnings
+      - name: Core, research and CLI tests
+        run: cargo +stable test --locked -p symbio-core -p symbio-research -p symbio-cli
       - name: UI module tests
         run: node --test scripts/*.test.mjs
       - name: CLI and MCP smoke checks

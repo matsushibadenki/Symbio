@@ -35,7 +35,7 @@ Transitive dependencies and platform-specific bundled components also retain the
 
 Symbio is an early reproducible derivation and research notebook built with Tauri 2 and Rust. It keeps mathematical meaning, assumptions and research history together, with the same Rust kernel serving both the desktop UI and CLI. It reuses ThreeX's wgpu renderer and ATOM's native panel infrastructure.
 
-**The current release is a Semantic Expression Graph (SEG) MVP. Mathematica compatibility, advanced CAS algorithms, LLM integration and formal proof engines are not implemented.**
+The Semantic Expression Graph (SEG) is the source of truth for notebook calculations. The desktop and CLI share the `symbio-research` crate for optional model-assisted research. It runs scratch calculations through `symbio-core`. The CLI also exposes those calculations over MCP. Full Mathematica compatibility and formal proof checking remain outside the current implementation.
 
 ## Screenshots
 
@@ -187,8 +187,8 @@ KOMYAKU's **↙ .symbio** reads the selected equation from the active branch of 
 ## Development checks
 
 ```sh
-cargo test --locked -p symbio-core -p symbio-cli -p symbio-desktop
-cargo clippy --locked -p symbio-core -p symbio-cli -p symbio-desktop --all-targets -- -D warnings
+cargo test --locked -p symbio-core -p symbio-research -p symbio-cli -p symbio-desktop
+cargo clippy --locked -p symbio-core -p symbio-research -p symbio-cli -p symbio-desktop --all-targets -- -D warnings
 python3 scripts/smoke-cli.py
 python3 scripts/smoke-math-keyboard.py
 node --check apps/desktop/ui/app.js

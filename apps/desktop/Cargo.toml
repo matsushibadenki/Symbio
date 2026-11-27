@@ -8,7 +8,7 @@ tauri-build = "=2.7.3"
 [dependencies]
 symbio-handwriting = { path = "../../crates/handwriting" }
 symbio-core = { path = "../../crates/symbio-core" }
-symbio-cli = { path = "../../crates/symbio-cli" }
+symbio-research = { path = "../../crates/symbio-research" }
 tauri = { version = "=2.12.4", features = ["unstable"] }
 serde.workspace = true
 tokio = "1"
